@@ -12,7 +12,7 @@ Ouvrir `index.html` dans un navigateur (aucune dépendance, tout est dans le fic
 python3 belote.py                  # belote contrat, jusqu'à 1000 points
 python3 belote.py --coinche        # mode coinche
 python3 belote.py --cible 500      # autre score cible
-python3 belote.py --bots simple    # bots basiques (par défaut : bots malins)
+python3 belote.py --bots malin      # bots moins forts (expert par défaut, simple aussi possible)
 python3 belote.py --auto --seed 1  # 4 bots jouent entre eux (reproductible)
 python3 -m unittest -v             # tests
 ```
@@ -39,11 +39,16 @@ python3 -m unittest -v             # tests
 
 ## Bots
 
-- **malin** (par défaut) : se souvient des cartes jouées, repère les cartes maîtresses, tire les atouts en attaque, charge quand le partenaire est maître, ne coupe pas les plis sans enjeu, soutient son partenaire aux enchères
-- **simple** : heuristiques sans mémoire. Sur 3000 donnes, le bot malin marque ~12 % de points en plus en belote contrat (donnes gagnées : 928 contre 719) et ~28 % en coinche
+- **expert** (par défaut) : joue comme le malin, et en plus :
+  - il simule des donnes plausibles à partir de ce qu'il a le droit de savoir (sa main, les cartes jouées, les couleurs que chacun n'a pas fournies, les enchères) puis joue la carte qui rapporte le plus en moyenne ; il ne voit jamais les mains des autres
+  - il fait et lit des **appels** : en défaussant hors atout, une carte forte (10, Roi, Dame) demande à son partenaire de rejouer cette couleur, une carte faible (7, 8) la refuse. Vous pouvez utiliser la même convention avec votre partenaire bot
+- **malin** : se souvient des cartes jouées, repère les cartes maîtresses, tire les atouts en attaque, charge quand le partenaire est maître, soutient son partenaire aux enchères
+- **simple** : heuristiques sans mémoire
+
+Mesures sur des donnes identiques jouées dans les deux sens (points d'écart par donne) : expert contre malin, +14 ± 1,4 en belote contrat et +17 ± 2,6 en coinche ; malin contre simple, environ +14.
 
 ## À faire
 
-- Défense plus fine (signaux au partenaire, compter les atouts restants)
+- Tenir compte des enchères (qui a passé) dans les simulations
 - Annonce « générale » en coinche
 - Annonces de coinche « générale »

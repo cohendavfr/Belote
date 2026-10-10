@@ -262,6 +262,232 @@ class BotMalin(Bot):
         return min(pool, key=lambda c: (points(c, atout), force(c, atout, c[1])))
 
 
+class BotExpert(BotMalin):
+    """Bot malin qui simule des donnes plausibles, lit les appels du partenaire et en envoie.
+
+    Il n'utilise que des informations publiques : sa main, les cartes déjà jouées (donc les
+    couleurs que chacun n'a pas fournies) et les enchères. Il ne voit jamais les mains des autres.
+
+    Convention d'appel (valable aussi pour vous, avec votre partenaire bot) : en défaussant hors
+    atout, une carte forte (10, Roi, Dame) dans une couleur demande de la rejouer, une carte
+    faible (7, 8) la refuse.
+    """
+
+    APPELS = ("10", "Roi", "Dame")
+    REFUS = ("7", "8")
+    ECHANTILLONS = 14
+    MARGE = 1.5  # en points : sous cet écart, on préfère la carte qui envoie un signal
+
+    # --- Lecture des informations publiques --------------------------------------
+    @staticmethod
+    def decouper_plis(vus, pli):
+        plis = [list(vus[i:i + 4]) for i in range(0, len(vus), 4)]
+        if pli:
+            plis.append(list(pli))
+        return plis
+
+    def signaux(self, vus, pli, atout):
+        """Lit les défausses publiques. Renvoie {joueur: {"appel": {couleurs}, "refus": {couleurs}}}."""
+        signaux = {j: {"appel": set(), "refus": set()} for j in range(4)}
+        for t in self.decouper_plis(vus, pli):
+            demandee = t[0][1][1]
+            for joueur, (valeur, couleur) in t[1:]:
+                if couleur in (demandee, atout):
+                    continue
+                if valeur in self.APPELS:
+                    signaux[joueur]["appel"].add(couleur)
+                    signaux[joueur]["refus"].discard(couleur)
+                elif valeur in self.REFUS:
+                    signaux[joueur]["refus"].add(couleur)
+                    signaux[joueur]["appel"].discard(couleur)
+        return signaux
+
+    def couleurs_vides(self, vus, pli, atout):
+        """Couleurs qu'un joueur n'a plus, déduites de ce qu'il n'a pas fourni."""
+        vides = {j: set() for j in range(4)}
+        for t in self.decouper_plis(vus, pli):
+            demandee = t[0][1][1]
+            for i, (joueur, (_, couleur)) in enumerate(t):
+                if i == 0 or couleur == demandee:
+                    continue
+                vides[joueur].add(demandee)
+                # Il devait couper si le partenaire n'était pas maître : sans coupe, plus d'atout.
+                if couleur != atout and gagnant_pli(t[:i], atout) != (joueur + 2) % 4:
+                    vides[joueur].add(atout)
+        return vides
+
+    # --- Simulation ---------------------------------------------------------------
+    def repartir(self, inconnues, besoins, vides, favorables, moi):
+        """Répartit au hasard les cartes inconnues en respectant les couleurs vides."""
+        for _ in range(25):
+            cartes = inconnues[:]
+            random.shuffle(cartes)
+            cartes.sort(key=lambda c: sum(1 for j in besoins if c[1] in vides[j]), reverse=True)
+            mains = {j: [] for j in besoins}
+            reste = dict(besoins)
+            ok = True
+            for c in cartes:
+                eligibles = [j for j in reste if reste[j] > 0 and c[1] not in vides[j]]
+                if not eligibles:
+                    ok = False
+                    break
+                j = random.choice(eligibles)
+                mains[j].append(c)
+                reste[j] -= 1
+            if ok:
+                return mains
+        # Dernier recours : répartition sans contrainte (ne devrait presque jamais arriver).
+        cartes = inconnues[:]
+        random.shuffle(cartes)
+        mains, i = {}, 0
+        for j, n in besoins.items():
+            mains[j] = cartes[i:i + n]
+            i += n
+        return mains
+
+    def poids_echantillon(self, mains, signaux, atout, partenaire):
+        """Les mains compatibles avec les appels du partenaire sont plus vraisemblables."""
+        w = 1.0
+        main = mains.get(partenaire, [])
+        for couleur in signaux[partenaire]["appel"]:
+            if any(c[1] == couleur and c[0] in ("As", "10", "Roi") for c in main):
+                w *= 3.0
+        for couleur in signaux[partenaire]["refus"]:
+            if any(c[1] == couleur and c[0] == "As" for c in main):
+                w *= 0.3
+        return w
+
+    def jouer_fin(self, mains, pli, atout, equipe):
+        """Termine la donne avec la politique simple. Renvoie les points de `equipe` (pli en cours compris)."""
+        simple = Bot()
+        gain = 0
+        pli = list(pli)
+        while True:
+            while len(pli) < 4:
+                j = apres(pli[0][0], len(pli))
+                jouables = cartes_jouables(mains[j], pli, atout)
+                carte = jouables[0] if len(jouables) == 1 else simple.choisir_carte(mains[j], jouables, pli, atout)
+                mains[j].remove(carte)
+                pli.append((j, carte))
+            gagnant = gagnant_pli(pli, atout)
+            g = sum(points(c, atout) for _, c in pli)
+            if all(not m for m in mains.values()):
+                g += BONUS_DIX_DE_DER
+            if gagnant % 2 == equipe:
+                gain += g
+            if all(not m for m in mains.values()):
+                return gain
+            pli = [(gagnant, None)]
+            # le gagnant entame : on lui fait jouer sa carte
+            jouables = list(mains[gagnant])
+            carte = jouables[0] if len(jouables) == 1 else simple.choisir_carte(mains[gagnant], jouables, [], atout)
+            mains[gagnant].remove(carte)
+            pli = [(gagnant, carte)]
+
+    def evaluer(self, main, jouables, pli, atout, vus, moi, signaux):
+        """Points moyens de notre équipe pour chaque carte jouable, sur des donnes plausibles."""
+        joues = {c for _, c in vus} | {c for _, c in pli}
+        inconnues = [c for c in creer_jeu() if c not in joues and c not in main]
+        deja = {j: 0 for j in range(4)}
+        for j, _ in list(vus) + list(pli):
+            deja[j] += 1
+        besoins = {j: 8 - deja[j] for j in range(4) if j != moi}
+        if sum(besoins.values()) != len(inconnues):
+            return None
+        vides = self.couleurs_vides(vus, pli, atout)
+        partenaire = (moi + 2) % 4
+        totaux = {c: 0.0 for c in jouables}
+        somme_poids = 0.0
+        for _ in range(self.ECHANTILLONS):
+            mains = self.repartir(inconnues, besoins, vides, None, moi)
+            w = self.poids_echantillon(mains, signaux, atout, partenaire)
+            somme_poids += w
+            for c in jouables:
+                simul = {j: list(m) for j, m in mains.items()}
+                simul[moi] = [x for x in main if x != c]
+                courant = list(pli) + [(moi, c)]
+                # le pli en cours est complété par la politique simple, puis la donne continue
+                totaux[c] += w * self.jouer_fin(simul, courant, atout, moi % 2)
+        return {c: t / somme_poids for c, t in totaux.items()}
+
+    # --- Choix de la carte ---------------------------------------------------------
+    def choisir_carte(self, main, jouables, pli, atout, vus=()):
+        if len(jouables) == 1:
+            return jouables[0]
+        connues = {c for _, c in vus} | {c for _, c in pli}
+        dehors = [(v, atout) for v in ORDRE_ATOUT if (v, atout) not in connues and (v, atout) not in main]
+        moi = apres(pli[0][0], len(pli)) if pli else self.moi
+        attaquant = self.preneur % 2 == moi % 2
+        signaux = self.signaux(vus, pli, atout)
+        if pli:
+            heuristique = self.suivre(main, jouables, pli, atout, connues, dehors, moi)
+        else:
+            heuristique = self.entame_experte(main, jouables, atout, connues, dehors, attaquant, moi, signaux)
+        scores = self.evaluer(main, jouables, pli, atout, vus, moi, signaux)
+        if not scores:
+            return heuristique
+        meilleur = max(scores.values())
+        if scores[heuristique] >= meilleur - self.MARGE:
+            return heuristique
+        return max(jouables, key=lambda c: (scores[c], -points(c, atout)))
+
+    def entame_experte(self, main, jouables, atout, connues, dehors, attaquant, moi, signaux):
+        if attaquant and dehors:
+            maitres = [c for c in jouables if c[1] == atout and self.est_maitre(c, atout, connues, main)]
+            if maitres:
+                return max(maitres, key=lambda c: force(c, atout, atout))
+        maitres = [c for c in jouables if c[1] != atout and self.est_maitre(c, atout, connues, main)]
+        if maitres:
+            return max(maitres, key=lambda c: points(c, atout))
+        partenaire = (moi + 2) % 4
+        # Répondre à l'appel du partenaire : on rejoue la couleur par une petite carte.
+        for couleur in sorted(signaux[partenaire]["appel"]):
+            cartes = [c for c in jouables if c[1] == couleur and couleur != atout]
+            if cartes:
+                return min(cartes, key=lambda c: force(c, atout, c[1]))
+        refus = signaux[partenaire]["refus"]
+        appels_adverses = signaux[(moi + 1) % 4]["appel"] | signaux[(moi + 3) % 4]["appel"]
+        pool = [c for c in jouables if c[1] != atout] or jouables
+        preferees = [c for c in pool if c[1] not in refus and c[1] not in appels_adverses]
+        return min(preferees or pool, key=lambda c: (points(c, atout), force(c, atout, c[1])))
+
+    def suivre(self, main, jouables, pli, atout, connues, dehors, moi):
+        demandee = pli[0][1][1]
+        courant = gagnant_pli(pli, atout)
+        meilleure = max(force(c, atout, demandee) for _, c in pli)
+        dernier = len(pli) == 3
+        enjeu = sum(points(c, atout) for _, c in pli)
+        if courant == (moi + 2) % 4:
+            carte_partenaire = next(c for j, c in pli if j == courant)
+            sur = dernier or (
+                self.est_maitre(carte_partenaire, atout, connues, main)
+                and (carte_partenaire[1] == atout or not dehors)
+            )
+            if sur:
+                return max(jouables, key=lambda c: (points(c, atout), -force(c, atout, c[1])))
+            return self.defausse(main, jouables, atout, demandee, partenaire_gagne=True)
+        gagnantes = [c for c in jouables if force(c, atout, demandee) > meilleure]
+        if gagnantes:
+            coupe = gagnantes[0][1] == atout and demandee != atout
+            if not coupe or dernier or enjeu >= 10:
+                return min(gagnantes, key=lambda c: force(c, atout, demandee))
+        return self.defausse(main, jouables, atout, demandee, partenaire_gagne=False)
+
+    def defausse(self, main, jouables, atout, demandee, partenaire_gagne):
+        """Carte à donner quand on ne veut ou ne peut pas gagner le pli : c'est ici qu'on fait un appel."""
+        hors = [c for c in jouables if c[1] not in (demandee, atout)]
+        if not hors or any(c[1] == demandee for c in jouables):
+            return min(jouables, key=lambda c: (points(c, atout), force(c, atout, c[1])))
+        mes_as = {c[1] for c in main if c[0] == "As" and c[1] != atout}
+        if partenaire_gagne:
+            appels = [c for c in hors if c[1] in mes_as and c[0] in self.APPELS]
+            if appels:
+                return max(appels, key=lambda c: points(c, atout))
+        poids = {couleur: sum(points(c, atout) for c in main if c[1] == couleur) for couleur in COULEURS}
+        pool = [c for c in hors if c[1] not in mes_as] or hors
+        return min(pool, key=lambda c: (points(c, atout), poids[c[1]], force(c, atout, c[1])))
+
+
 class Humain:
     def debut_donne(self, moi, atout, preneur):
         pass
@@ -501,14 +727,14 @@ def jouer_partie(joueurs, cible=1000, parler=print, coinche=False):
 def main():
     parser = argparse.ArgumentParser(description="Belote")
     parser.add_argument("--coinche", action="store_true", help="mode coinche (enchères au point)")
-    parser.add_argument("--bots", choices=["malin", "simple"], default="malin", help="niveau des bots")
+    parser.add_argument("--bots", choices=["expert", "malin", "simple"], default="expert", help="niveau des bots")
     parser.add_argument("--auto", action="store_true", help="4 bots jouent entre eux")
     parser.add_argument("--seed", type=int, help="graine aléatoire")
     parser.add_argument("--cible", type=int, default=1000, help="score à atteindre (défaut 1000)")
     args = parser.parse_args()
     if args.seed is not None:
         random.seed(args.seed)
-    bot = BotMalin if args.bots == "malin" else Bot
+    bot = {"expert": BotExpert, "malin": BotMalin, "simple": Bot}[args.bots]
     joueurs = [bot() if args.auto else Humain(), bot(), bot(), bot()]
     jouer_partie(joueurs, args.cible, coinche=args.coinche)
 

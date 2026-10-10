@@ -2,7 +2,7 @@ import random
 import unittest
 
 import belote
-from belote import Bot, BotMalin, cartes_jouables, gagnant_pli, jouer_donne, points, resultat
+from belote import Bot, BotExpert, BotMalin, cartes_jouables, gagnant_pli, jouer_donne, points, resultat
 
 
 class TestRegles(unittest.TestCase):
@@ -209,6 +209,74 @@ class TestBotMalin(unittest.TestCase):
         self.assertEqual(res, (90, "Pique"))
 
 
+class TestExpert(unittest.TestCase):
+    def bot(self, moi=0, preneur=1, atout="Pique"):
+        b = BotExpert()
+        b.debut_donne(moi, atout, preneur)
+        return b
+
+    def test_lit_les_appels_et_refus(self):
+        # pli 1 : Coeur demandé, le joueur 2 défausse le 10 de carreau (appel)
+        # pli 2 : le joueur 2 défausse le 7 de trèfle (refus)
+        vus = [(0, ("As", "Coeur")), (3, ("7", "Coeur")), (2, ("10", "Carreau")), (1, ("8", "Coeur")),
+               (0, ("Roi", "Pique")), (3, ("9", "Pique")), (2, ("7", "Trefle")), (1, ("8", "Pique"))]
+        s = self.bot().signaux(vus, [], "Pique")
+        self.assertEqual(s[2]["appel"], {"Carreau"})
+        self.assertEqual(s[2]["refus"], {"Trefle"})
+        self.assertEqual(s[0]["appel"], set())
+
+    def test_deduit_les_couleurs_vides(self):
+        vus = [(0, ("As", "Coeur")), (3, ("7", "Trefle")), (2, ("9", "Coeur")), (1, ("8", "Coeur"))]
+        vides = self.bot().couleurs_vides(vus, [], "Pique")
+        self.assertIn("Coeur", vides[3])
+        self.assertEqual(vides[1], set())
+
+    def test_repartition_respecte_les_couleurs_vides(self):
+        b = self.bot(moi=0)
+        inconnues = [(v, c) for c in ("Coeur", "Trefle") for v in belote.VALEURS]
+        vides = {0: set(), 1: {"Coeur"}, 2: set(), 3: {"Trefle"}}
+        for _ in range(30):
+            mains = b.repartir(inconnues, {1: 8, 2: 0, 3: 8}, vides, None, 0)
+            self.assertTrue(all(c[1] != "Coeur" for c in mains[1]))
+            self.assertTrue(all(c[1] != "Trefle" for c in mains[3]))
+            self.assertEqual((len(mains[1]), len(mains[3])), (8, 8))
+
+    def test_appel_en_defaussant(self):
+        # partenaire (2) gagne le pli à Coeur ; on n'a plus de coeur et on a l'As de carreau
+        main = [("As", "Carreau"), ("10", "Carreau"), ("7", "Trefle")]
+        pli = [(1, ("7", "Coeur")), (2, ("As", "Coeur")), (3, ("8", "Coeur"))]
+        carte = self.bot(moi=0).defausse(main, main, "Pique", "Coeur", partenaire_gagne=True)
+        self.assertEqual(carte, ("10", "Carreau"))
+
+    def test_refus_en_defaussant(self):
+        main = [("As", "Carreau"), ("10", "Carreau"), ("7", "Trefle"), ("Roi", "Trefle")]
+        carte = self.bot(moi=0).defausse(main, main, "Pique", "Coeur", partenaire_gagne=False)
+        self.assertEqual(carte, ("7", "Trefle"))
+
+    def test_repond_a_lappel_du_partenaire(self):
+        main = [("8", "Carreau"), ("Roi", "Carreau"), ("7", "Trefle")]
+        vus = [(0, ("As", "Coeur")), (3, ("7", "Coeur")), (2, ("10", "Carreau")), (1, ("8", "Coeur"))]
+        b = self.bot(moi=0, preneur=1)
+        carte = b.entame_experte(main, main, "Pique", {c for _, c in vus}, [], False, 0, b.signaux(vus, [], "Pique"))
+        self.assertEqual(carte, ("8", "Carreau"))
+
+    def test_ne_triche_pas(self):
+        """Mêmes informations publiques, mains cachées différentes : le choix ne dépend pas d'elles."""
+        main = [("As", "Coeur"), ("Roi", "Coeur"), ("9", "Pique"), ("7", "Carreau"), ("10", "Trefle")]
+        vus = [(0, ("8", "Coeur")), (3, ("Valet", "Coeur")), (2, ("7", "Coeur")), (1, ("9", "Coeur"))]
+        choix = set()
+        for graine in range(3):
+            random.seed(graine)
+            b = self.bot(moi=0, preneur=0, atout="Pique")
+            jouables = cartes_jouables(main, [], "Pique")
+            choix.add(b.choisir_carte(main, jouables, [], "Pique", vus))
+        # le bot ne reçoit jamais les mains des autres : la seule variation vient de ses tirages
+        self.assertLessEqual(len(choix), 2)
+        import inspect
+        self.assertEqual(list(inspect.signature(BotExpert.choisir_carte).parameters),
+                         ["self", "main", "jouables", "pli", "atout", "vus"])
+
+
 class TestSimulation(unittest.TestCase):
     def test_donnes_automatiques(self):
         random.seed(42)
@@ -234,6 +302,15 @@ class TestSimulation(unittest.TestCase):
                 total[0] += res["marque"][eq]
                 total[1] += res["marque"][1 - eq]
         self.assertGreater(total[0], total[1])
+
+    def test_donnes_entre_experts(self):
+        random.seed(3)
+        joueurs = [BotExpert() for _ in range(4)]
+        for mode in (False, True):
+            for i in range(25):
+                res = jouer_donne(joueurs, i % 4, parler=lambda *_: None, coinche=mode)
+                if res is not None:
+                    self.assertEqual(sum(res["cartes"]), belote.TOTAL_CARTES)
 
     def test_donnes_coinche_automatiques(self):
         random.seed(7)

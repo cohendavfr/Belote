@@ -176,6 +176,7 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
           <summary>Rappel des règles</summary>
           <p><b>Valeurs à l'atout :</b> Valet 20, 9 14, As 11, 10 10, Roi 4, Dame 3. <b>Hors atout :</b> As 11, 10 10, Roi 4, Dame 3, Valet 2. Dix de der +10, belote-rebelote +20.</p>
           <p><b>Jeu :</b> fournir la couleur demandée ; sinon couper (sauf si votre partenaire est maître) en montant si possible.</p>
+          <p><b>Appels :</b> en défaussant hors atout, une carte forte (10, Roi, Dame) dans une couleur demande à votre partenaire de la rejouer ; une faible (7, 8) la refuse. Les bots experts suivent cette convention, avec vous comme entre eux.</p>
           <p><b>Belote contrat :</b> le preneur doit marquer plus que ses adversaires. <b>Coinche :</b> contrat de 80 à 160 ou capot ; on peut coincher (×2) puis surcoincher (×4).</p>
         </details>
       </section>
@@ -367,6 +368,187 @@ class BotMalin extends Bot {
   }
 }
 
+const APPELS = ["10", "Roi", "Dame"], REFUS = ["7", "8"];
+
+/* Bot expert : simule des donnes plausibles, lit les appels du partenaire et en envoie.
+   N'utilise que des informations publiques (sa main, les cartes jouées, les enchères). */
+class BotExpert extends BotMalin {
+  constructor() { super(); this.ECHANTILLONS = 14; this.MARGE = 1.5; this.simple = new Bot(); }
+
+  decouperPlis(vus, pli) {
+    const plis = [];
+    for (let i = 0; i < vus.length; i += 4) plis.push(vus.slice(i, i + 4));
+    if (pli.length) plis.push(pli.slice());
+    return plis;
+  }
+  signaux(vus, pli, atout) {
+    const s = [0, 1, 2, 3].map(() => ({ appel: new Set(), refus: new Set() }));
+    for (const t of this.decouperPlis(vus, pli)) {
+      const dem = t[0].carte.c;
+      for (const { j, carte } of t.slice(1)) {
+        if (carte.c === dem || carte.c === atout) continue;
+        if (APPELS.includes(carte.v)) { s[j].appel.add(carte.c); s[j].refus.delete(carte.c); }
+        else if (REFUS.includes(carte.v)) { s[j].refus.add(carte.c); s[j].appel.delete(carte.c); }
+      }
+    }
+    return s;
+  }
+  couleursVides(vus, pli, atout) {
+    const vides = [0, 1, 2, 3].map(() => new Set());
+    for (const t of this.decouperPlis(vus, pli)) {
+      const dem = t[0].carte.c;
+      t.forEach((x, i) => {
+        if (i === 0 || x.carte.c === dem) return;
+        vides[x.j].add(dem);
+        if (x.carte.c !== atout && gagnantPli(t.slice(0, i), atout) !== (x.j + 2) % 4) vides[x.j].add(atout);
+      });
+    }
+    return vides;
+  }
+  repartir(inconnues, besoins, vides) {
+    const joueurs = [0, 1, 2, 3].filter((j) => besoins[j] !== null);
+    const nbVides = (c) => joueurs.filter((j) => vides[j].has(c.c)).length;
+    for (let essai = 0; essai < 25; essai++) {
+      const cartes = melanger(inconnues).sort((a, b) => nbVides(b) - nbVides(a));
+      const mains = [[], [], [], []], reste = besoins.slice();
+      let ok = true;
+      for (const c of cartes) {
+        const eligibles = joueurs.filter((j) => reste[j] > 0 && !vides[j].has(c.c));
+        if (!eligibles.length) { ok = false; break; }
+        const j = eligibles[Math.floor(Math.random() * eligibles.length)];
+        mains[j].push(c); reste[j]--;
+      }
+      if (ok) return mains;
+    }
+    const cartes = melanger(inconnues), mains = [[], [], [], []];
+    let i = 0;
+    for (const j of joueurs) { mains[j] = cartes.slice(i, i + besoins[j]); i += besoins[j]; }
+    return mains;
+  }
+  poidsEchantillon(mains, signaux, partenaire) {
+    let w = 1;
+    const m = mains[partenaire];
+    for (const couleur of signaux[partenaire].appel) if (m.some((c) => c.c === couleur && ["As", "10", "Roi"].includes(c.v))) w *= 3;
+    for (const couleur of signaux[partenaire].refus) if (m.some((c) => c.c === couleur && c.v === "As")) w *= 0.3;
+    return w;
+  }
+  retirer(main, carte) { const i = main.findIndex((c) => k(c) === k(carte)); main.splice(i, 1); }
+  jouerFin(mains, pli, atout, equipe) {
+    let gain = 0;
+    pli = pli.slice();
+    while (true) {
+      while (pli.length < 4) {
+        const j = apres(pli[0].j, pli.length);
+        const jouables = cartesJouables(mains[j], pli, atout);
+        const carte = jouables.length === 1 ? jouables[0] : this.simple.choisirCarte(mains[j], jouables, pli, atout);
+        this.retirer(mains[j], carte);
+        pli.push({ j, carte });
+      }
+      const gagnant = gagnantPli(pli, atout);
+      const fini = mains.every((m) => m.length === 0);
+      const g = pli.reduce((s, x) => s + pts(x.carte, atout), 0) + (fini ? DIX_DE_DER : 0);
+      if (gagnant % 2 === equipe) gain += g;
+      if (fini) return gain;
+      const jouables = mains[gagnant].slice();
+      const carte = jouables.length === 1 ? jouables[0] : this.simple.choisirCarte(mains[gagnant], jouables, [], atout);
+      this.retirer(mains[gagnant], carte);
+      pli = [{ j: gagnant, carte }];
+    }
+  }
+  evaluer(main, jouables, pli, atout, vus, moi, signaux) {
+    const joues = new Set(vus.map((x) => k(x.carte)).concat(pli.map((x) => k(x.carte))));
+    const inconnues = creerJeu().filter((c) => !joues.has(k(c)) && !has(main, c));
+    const deja = [0, 0, 0, 0];
+    for (const x of vus.concat(pli)) deja[x.j]++;
+    const besoins = [0, 1, 2, 3].map((j) => (j === moi ? null : 8 - deja[j]));
+    if (besoins.reduce((s, n) => s + (n || 0), 0) !== inconnues.length) return null;
+    const vides = this.couleursVides(vus, pli, atout);
+    const partenaire = (moi + 2) % 4;
+    const totaux = new Map(jouables.map((c) => [k(c), 0]));
+    let somme = 0;
+    for (let e = 0; e < this.ECHANTILLONS; e++) {
+      const mains = this.repartir(inconnues, besoins, vides);
+      const w = this.poidsEchantillon(mains, signaux, partenaire);
+      somme += w;
+      for (const c of jouables) {
+        const simul = mains.map((m) => m.slice());
+        simul[moi] = main.filter((x) => k(x) !== k(c));
+        totaux.set(k(c), totaux.get(k(c)) + w * this.jouerFin(simul, pli.concat([{ j: moi, carte: c }]), atout, moi % 2));
+      }
+    }
+    for (const [cle, t] of totaux) totaux.set(cle, t / somme);
+    return totaux;
+  }
+  choisirCarte(main, jouables, pli, atout, vus) {
+    if (jouables.length === 1) return jouables[0];
+    const connues = new Set(vus.map((x) => k(x.carte)).concat(pli.map((x) => k(x.carte))));
+    const dehors = ORD_ATOUT.map((v) => ({ v, c: atout })).filter((c) => !connues.has(k(c)) && !has(main, c));
+    const moi = pli.length ? apres(pli[0].j, pli.length) : this.moi;
+    const attaquant = this.preneur % 2 === moi % 2;
+    const signaux = this.signaux(vus, pli, atout);
+    const heuristique = pli.length
+      ? this.suivre(main, jouables, pli, atout, connues, dehors, moi)
+      : this.entameExperte(main, jouables, atout, connues, dehors, attaquant, moi, signaux);
+    const scores = this.evaluer(main, jouables, pli, atout, vus, moi, signaux);
+    if (!scores) return heuristique;
+    const meilleur = Math.max(...scores.values());
+    if (scores.get(k(heuristique)) >= meilleur - this.MARGE) return heuristique;
+    return maxBy(jouables, (c) => [scores.get(k(c)), -pts(c, atout)]);
+  }
+  entameExperte(main, jouables, atout, connues, dehors, attaquant, moi, signaux) {
+    if (attaquant && dehors.length) {
+      const maitres = jouables.filter((c) => c.c === atout && this.estMaitre(c, atout, connues, main));
+      if (maitres.length) return maxBy(maitres, (c) => [force(c, atout, atout)]);
+    }
+    const maitres = jouables.filter((c) => c.c !== atout && this.estMaitre(c, atout, connues, main));
+    if (maitres.length) return maxBy(maitres, (c) => [pts(c, atout)]);
+    const partenaire = (moi + 2) % 4;
+    for (const couleur of [...signaux[partenaire].appel].sort()) {
+      const cartes = jouables.filter((c) => c.c === couleur && couleur !== atout);
+      if (cartes.length) return minBy(cartes, (c) => [force(c, atout, c.c)]);
+    }
+    const refus = signaux[partenaire].refus;
+    const adverses = new Set([...signaux[(moi + 1) % 4].appel, ...signaux[(moi + 3) % 4].appel]);
+    const pool = jouables.filter((c) => c.c !== atout);
+    const base = pool.length ? pool : jouables;
+    const preferees = base.filter((c) => !refus.has(c.c) && !adverses.has(c.c));
+    return minBy(preferees.length ? preferees : base, (c) => [pts(c, atout), force(c, atout, c.c)]);
+  }
+  suivre(main, jouables, pli, atout, connues, dehors, moi) {
+    const dem = pli[0].carte.c;
+    const courant = gagnantPli(pli, atout);
+    const meilleure = Math.max(...pli.map((x) => force(x.carte, atout, dem)));
+    const dernier = pli.length === 3;
+    const enjeu = pli.reduce((s, x) => s + pts(x.carte, atout), 0);
+    if (courant === (moi + 2) % 4) {
+      const cp = pli.find((x) => x.j === courant).carte;
+      const sur = dernier || (this.estMaitre(cp, atout, connues, main) && (cp.c === atout || dehors.length === 0));
+      if (sur) return maxBy(jouables, (c) => [pts(c, atout), -force(c, atout, c.c)]);
+      return this.defausse(main, jouables, atout, dem, true);
+    }
+    const gagnantes = jouables.filter((c) => force(c, atout, dem) > meilleure);
+    if (gagnantes.length) {
+      const coupe = gagnantes[0].c === atout && dem !== atout;
+      if (!coupe || dernier || enjeu >= 10) return minBy(gagnantes, (c) => [force(c, atout, dem)]);
+    }
+    return this.defausse(main, jouables, atout, dem, false);
+  }
+  /* Carte à donner quand on ne veut ou ne peut pas gagner le pli : c'est ici qu'on fait un appel. */
+  defausse(main, jouables, atout, dem, partenaireGagne) {
+    const hors = jouables.filter((c) => c.c !== dem && c.c !== atout);
+    if (!hors.length || jouables.some((c) => c.c === dem)) return minBy(jouables, (c) => [pts(c, atout), force(c, atout, c.c)]);
+    const masAs = new Set(main.filter((c) => c.v === "As" && c.c !== atout).map((c) => c.c));
+    if (partenaireGagne) {
+      const appels = hors.filter((c) => masAs.has(c.c) && APPELS.includes(c.v));
+      if (appels.length) return maxBy(appels, (c) => [pts(c, atout)]);
+    }
+    const poids = {};
+    for (const couleur of COULEURS) poids[couleur] = main.filter((c) => c.c === couleur).reduce((s, c) => s + pts(c, atout), 0);
+    const pool = hors.filter((c) => !masAs.has(c.c));
+    return minBy(pool.length ? pool : hors, (c) => [pts(c, atout), poids[c.c], force(c, atout, c.c)]);
+  }
+}
+
 function resultat(preneur, cartes, plis, beloteEquipe, atout, contrat, mult) {
   const eq = preneur % 2;
   const totaux = cartes.slice();
@@ -396,7 +578,7 @@ function resultat(preneur, cartes, plis, beloteEquipe, atout, contrat, mult) {
 /* ===================== État et interface ===================== */
 const $ = (s) => document.querySelector(s);
 const S = {
-  mode: "belote", niveau: "malin", cible: 1000, rapide: false, auto: false,
+  mode: "belote", niveau: "expert", cible: 1000, rapide: false, auto: false,
   scores: [0, 0], donneur: 0, mains: [[], [], [], []], pli: [], vus: [], atout: null, preneur: null,
   contrat: null, mult: 1, retournee: null, tour: null, gagnant: null, bulles: {}, journal: [],
   partieId: 0, attenteCarte: null, enchereCourante: null, voix: "fr",
@@ -855,7 +1037,7 @@ async function jouerPartie() {
   arreterVoix();
   S.scores = [0, 0]; S.journal = []; S.attenteCarte = null; S.mains = [[], [], [], []];
   $("#action").innerHTML = ""; renderJournal();
-  const Cls = S.niveau === "malin" ? BotMalin : Bot;
+  const Cls = { expert: BotExpert, malin: BotMalin, simple: Bot }[S.niveau] || BotExpert;
   bots = [null, new Cls(), new Cls(), new Cls()];
   let donneur = Math.floor(Math.random() * 4);
   try {
@@ -880,7 +1062,7 @@ function lireReglages() {
   try { return JSON.parse(localStorage.getItem("belote-reglages") || "{}"); } catch (e) { return {}; }
 }
 function ecrireReglages() {
-  try { localStorage.setItem("belote-reglages", JSON.stringify({ mode: S.mode, niveau: S.niveau, cible: S.cible, rapide: S.rapide, voix: S.voix })); } catch (e) { /* stockage indisponible */ }
+  try { localStorage.setItem("belote-reglages", JSON.stringify({ version: 2, mode: S.mode, niveau: S.niveau, cible: S.cible, rapide: S.rapide, voix: S.voix })); } catch (e) { /* stockage indisponible */ }
 }
 
 function arreterVoix() { try { window.speechSynthesis.cancel(); } catch (e) { /* pas de synthèse vocale */ } }
@@ -895,6 +1077,7 @@ function menu() {
       ${radio("mode", "coinche", "Coinche (enchères au point)", S.mode === "coinche")}
     </fieldset>
     <fieldset class="choix"><legend>Adversaires</legend>
+      ${radio("niveau", "expert", "Experts : ils simulent la donne et se font des appels", S.niveau === "expert")}
       ${radio("niveau", "malin", "Malins : ils retiennent les cartes", S.niveau === "malin")}
       ${radio("niveau", "simple", "Simples", S.niveau === "simple")}
     </fieldset>
@@ -922,17 +1105,18 @@ function menu() {
 }
 
 $("#btn-nouvelle").addEventListener("click", menu);
-{ const r = lireReglages(); if (r.mode) S.mode = r.mode; if (r.niveau) S.niveau = r.niveau; if (r.cible) S.cible = r.cible; if (r.voix) S.voix = r.voix; S.rapide = !!r.rapide; }
+{ const r = lireReglages(); if (r.mode) S.mode = r.mode; if (r.niveau) S.niveau = r.version >= 2 || r.niveau !== "malin" ? r.niveau : "expert"; if (r.cible) S.cible = r.cible; if (r.voix) S.voix = r.voix; S.rapide = !!r.rapide; }
 render();
 menu();
 
 /* Simulation sans interface, pour vérifier le moteur depuis la console. */
 window.__belote = {
-  async simuler(n, mode) {
+  async simuler(n, mode, niveau = "expert") {
     const avant = { mode: S.mode, auto: S.auto };
     S.auto = true; S.mode = mode; S.partieId++;
     const stats = { donnes: 0, redistribuees: 0, ecartTotal: 0, remplis: 0 };
-    bots = [new BotMalin(), new BotMalin(), new BotMalin(), new BotMalin()];
+    const Cls = { expert: BotExpert, malin: BotMalin, simple: Bot }[niveau];
+    bots = [new Cls(), new Cls(), new Cls(), new Cls()];
     for (let i = 0; i < n; i++) {
       const r = await jouerDonne(i % 4);
       stats.donnes++;
