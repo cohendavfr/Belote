@@ -546,14 +546,18 @@ const PHRASES = {
 };
 const SILENCE_MS = 2000;
 
-/* Les voix naturelles (Premium, Enhanced, Neural, Google…) passent devant les voix robotiques. */
-function scoreVoix(v) {
+/* Classement des voix : naturelles d'abord, voix fantaisie (macOS) et robotiques en dernier. */
+const VOIX_NATURELLES = /^(samantha|daniel|karen|moira|tessa|aaron|nicky|arthur|martha|gordon|catherine|thomas|am[ée]lie|marie|jacques|m[óo]nica|paulina|jorge|juan|diego|marisol|ang[ée]lica|kyoko|o-ren|hattori|otoya|alex|victoria|allison|ava|susan|google|microsoft|siri)/;
+const VOIX_FANTAISIE = /^(albert|bahh|boing|bonnes nouvelles|good news|bouffon|jester|bulles|bubbles|cloches|bells|fred|junior|kathy|mauvaises nouvelles|bad news|murmure|whisper|orgue|organ|ralph|superstar|trino[iï]des?|violoncelles|cellos|wobble|zarvox|deranged|hysterical|princess)/;
+const VOIX_ROBOTIQUES = /^(eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley|espeak)/;
+function scoreVoix(v, lang) {
   const n = v.name.toLowerCase();
   let s = 0;
+  if (VOIX_NATURELLES.test(n)) s += 6;
   if (/premium|enhanced|neural|natural|online|wavenet/.test(n)) s += 4;
-  if (/google|siri|microsoft/.test(n)) s += 2;
-  if (v.localService === false) s += 1;
-  if (/compact|espeak|novelty|zarvox|bad news|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoids|whisper|wobble|albert|fred|junior|ralph|princess|grandma|grandpa|rocko|shelley|flo|sandy|eddy|reed|bahh/.test(n)) s -= 6;
+  if (VOIX_FANTAISIE.test(n)) s -= 10;
+  if (VOIX_ROBOTIQUES.test(n)) s -= 2;
+  if (lang && v.lang.replace("_", "-").toLowerCase() === lang.toLowerCase()) s += 1;
   return s;
 }
 function voixPour(p, lang) {
@@ -561,8 +565,8 @@ function voixPour(p, lang) {
     const prefixe = lang.slice(0, 2).toLowerCase();
     const voix = window.speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().replace("_", "-").startsWith(prefixe));
     if (!voix.length) return null;
-    const classees = voix.slice().sort((a, b) => scoreVoix(b) - scoreVoix(a));
-    const bonnes = classees.filter((v) => scoreVoix(v) >= 0);
+    const classees = voix.slice().sort((a, b) => scoreVoix(b, lang) - scoreVoix(a, lang));
+    const bonnes = classees.filter((v) => scoreVoix(v, lang) >= 0);
     const liste = bonnes.length ? bonnes : classees;
     return liste[p % liste.length];
   } catch (e) { return null; }
