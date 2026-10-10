@@ -17,10 +17,11 @@ python3 -m unittest -v             # tests
 - Enchères en 2 tours (à la couleur retournée, puis à une autre couleur) ; redistribution si tout le monde passe
 - Jeu des plis : fournir, couper (sauf si le partenaire est maître), surcouper / monter à l'atout
 - Valeurs atout / hors atout, dix de der (+10), belote-rebelote (+20), capot (+90)
+- Annonces : tierce (20), cinquante (50), cent (100), carrés (valets 200, 9 150, autres 100) ; seule l'équipe qui détient la meilleure annonce marque les siennes (valeur, puis hauteur, puis atout). Annonces déclarées automatiquement
 - Contrat : le preneur doit marquer plus que ses adversaires, sinon « chute » (162 points pour la défense)
 
 ## À faire
 
-- Annonces (tierce, cinquante, cent, carré)
+- Choix d'annoncer ou non (aujourd'hui automatique)
 - Bots plus malins (mémoire des cartes jouées, défense)
 - Mode « coinche » / contre

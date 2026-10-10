@@ -2,7 +2,8 @@ import random
 import unittest
 
 import belote
-from belote import Bot, cartes_jouables, gagnant_pli, jouer_donne, points, resultat
+from belote import (Bot, cartes_jouables, gagnant_pli, jouer_donne, points, points_annonces,
+                    resultat, trouver_annonces)
 
 
 class TestRegles(unittest.TestCase):
@@ -68,6 +69,51 @@ class TestScore(unittest.TestCase):
     def test_belote_conservee_en_cas_de_chute(self):
         r = resultat(0, [60, 102], [3, 5], 0)
         self.assertEqual(r["marque"], [20, 162])
+
+
+class TestAnnonces(unittest.TestCase):
+    def noms(self, main, atout="Pique"):
+        return sorted(a["nom"] for a in trouver_annonces(main, atout))
+
+    def test_tierce(self):
+        main = [("7", "Coeur"), ("8", "Coeur"), ("9", "Coeur"), ("As", "Pique")]
+        self.assertEqual(self.noms(main), ["Tierce à 9♥"])
+
+    def test_cinquante_et_cent(self):
+        quatre = [(v, "Trefle") for v in ("Valet", "Dame", "Roi", "As")]
+        cinq = [(v, "Trefle") for v in ("9", "10", "Valet", "Dame", "Roi")]
+        self.assertEqual(self.noms(quatre), ["Cinquante à As♣"])
+        self.assertEqual(self.noms(cinq), ["Cent à Roi♣"])
+
+    def test_carre_de_valets(self):
+        main = [("Valet", c) for c in belote.COULEURS] + [("7", "Coeur")]
+        a = trouver_annonces(main, "Pique")
+        self.assertEqual([x["points"] for x in a], [200])
+
+    def test_pas_dannonce(self):
+        main = [("7", "Coeur"), ("9", "Coeur"), ("10", "Pique"), ("As", "Trefle")]
+        self.assertEqual(trouver_annonces(main, "Pique"), [])
+
+    def test_seule_la_meilleure_equipe_marque(self):
+        tierce_a = [("7", "Coeur"), ("8", "Coeur"), ("9", "Coeur")]
+        cinquante_b = [(v, "Trefle") for v in ("Valet", "Dame", "Roi", "As")]
+        mains = [tierce_a, cinquante_b, [("7", "Pique")], [("8", "Pique")]]
+        _, totaux = points_annonces(mains, "Pique")
+        self.assertEqual(totaux, [0, 50])
+
+    def test_atout_departage_deux_tierces(self):
+        t1 = [("7", "Coeur"), ("8", "Coeur"), ("9", "Coeur")]
+        t2 = [("7", "Pique"), ("8", "Pique"), ("9", "Pique")]
+        _, totaux = points_annonces([t1, t2, [], []], "Pique")
+        self.assertEqual(totaux, [0, 20])
+
+    def test_annonces_dans_le_score(self):
+        r = resultat(0, [100, 62], [5, 3], None, annonces=(50, 0))
+        self.assertEqual(r["marque"], [150, 62])
+
+    def test_chute_donne_les_annonces_a_la_defense(self):
+        r = resultat(0, [60, 102], [3, 5], None, annonces=(20, 0))
+        self.assertEqual(r["marque"], [0, 162 + 20])
 
 
 class TestSimulation(unittest.TestCase):

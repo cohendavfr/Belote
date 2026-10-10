@@ -86,6 +86,68 @@ def afficher_main(main, atout=None):
     return "  ".join(nom_carte(c) for c in trier_main(main, atout))
 
 
+# --- Annonces ------------------------------------------------------------------
+
+POINTS_SEQUENCE = {3: 20, 4: 50, 5: 100}
+NOMS_SEQUENCE = {3: "Tierce", 4: "Cinquante", 5: "Cent"}
+POINTS_CARRE = {"Valet": 200, "9": 150, "As": 100, "10": 100, "Roi": 100, "Dame": 100}
+
+
+def trouver_annonces(main, atout):
+    """Renvoie les annonces d'une main : liste de dicts (nom, points, rang, atout).
+
+    Les carrés sont pris en premier ; les suites sont cherchées dans les cartes restantes.
+    """
+    annonces = []
+    restantes = list(main)
+    for valeur, pts in POINTS_CARRE.items():
+        if sum(1 for v, _ in main if v == valeur) == 4:
+            annonces.append({"nom": f"Carré de {valeur}", "points": pts,
+                             "rang": ORDRE_PLAIN.index(valeur), "atout": False})
+            restantes = [c for c in restantes if c[0] != valeur]
+    for couleur in COULEURS:
+        indices = sorted(VALEURS.index(v) for v, c in restantes if c == couleur)
+        suite = []
+        for i in indices + [None]:
+            if suite and (i is None or i != suite[-1] + 1):
+                if len(suite) >= 3:
+                    n = len(suite)
+                    pts = POINTS_SEQUENCE[min(n, 5)]
+                    nom = NOMS_SEQUENCE[min(n, 5)]
+                    haute = VALEURS[suite[-1]]
+                    annonces.append({"nom": f"{nom} à {haute}{SYMBOLES[couleur]}", "points": pts,
+                                     "rang": suite[-1], "atout": couleur == atout,
+                                     "longueur": n})
+                suite = []
+            if i is not None:
+                suite.append(i)
+    return annonces
+
+
+def cle_annonce(annonce):
+    """Ordre de comparaison : valeur, hauteur, puis atout."""
+    return (annonce["points"], annonce["rang"], annonce["atout"])
+
+
+def points_annonces(mains, atout):
+    """Renvoie (annonces par joueur, points d'annonces par équipe).
+
+    Seule l'équipe qui détient la meilleure annonce marque ses annonces.
+    """
+    par_joueur = [trouver_annonces(m, atout) for m in mains]
+    meilleures = {}
+    for p, liste in enumerate(par_joueur):
+        for a in liste:
+            if p % 2 not in meilleures or cle_annonce(a) > cle_annonce(meilleures[p % 2]):
+                meilleures[p % 2] = a
+    totaux = [0, 0]
+    if not meilleures:
+        return par_joueur, totaux
+    gagnante = max(meilleures, key=lambda e: cle_annonce(meilleures[e]))
+    totaux[gagnante] = sum(a["points"] for p in range(4) if p % 2 == gagnante for a in par_joueur[p])
+    return par_joueur, totaux
+
+
 # --- Joueurs -----------------------------------------------------------------
 
 class Bot:
@@ -205,6 +267,12 @@ def jouer_donne(joueurs, donneur, parler=print):
 
     parler(f"Atout : {SYMBOLES[atout]} {atout} (pris par {NOMS[preneur]})")
 
+    annonces_joueurs, annonces = points_annonces(mains, atout)
+    for p in range(4):
+        for a in annonces_joueurs[p]:
+            marque = annonces[p % 2] > 0
+            parler(f"  {NOMS[p]} annonce : {a['nom']} ({a['points']})" + ("" if marque else " — non retenue"))
+
     belote_jouees = 0
     cartes = [0, 0]
     plis = [0, 0]
@@ -232,11 +300,13 @@ def jouer_donne(joueurs, donneur, parler=print):
         parler(f"Pli {numero + 1} : {NOMS[gagnant]} (+{gain})")
         meneur = gagnant
 
-    return resultat(preneur, cartes, plis, belote_equipe, atout)
+    return resultat(preneur, cartes, plis, belote_equipe, atout, annonces)
 
 
-def resultat(preneur, cartes, plis, belote_equipe, atout=None):
+def resultat(preneur, cartes, plis, belote_equipe, atout=None, annonces=(0, 0)):
     totaux = list(cartes)
+    for e in (0, 1):
+        totaux[e] += annonces[e]
     if belote_equipe is not None:
         totaux[belote_equipe] += BONUS_BELOTE
     for e in (0, 1):
@@ -248,12 +318,12 @@ def resultat(preneur, cartes, plis, belote_equipe, atout=None):
     marque = list(totaux)
     if not contrat_rempli:
         marque = [0, 0]
-        marque[1 - eq] = TOTAL_CARTES
+        marque[1 - eq] = TOTAL_CARTES + sum(annonces)
         if belote_equipe is not None:
             marque[belote_equipe] += BONUS_BELOTE
     return {
         "preneur": preneur, "atout": atout, "cartes": cartes, "plis": plis,
-        "belote": belote_equipe, "totaux": totaux, "marque": marque, "rempli": contrat_rempli,
+        "belote": belote_equipe, "annonces": list(annonces), "totaux": totaux, "marque": marque, "rempli": contrat_rempli,
     }
 
 
