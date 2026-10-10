@@ -239,8 +239,24 @@ function cartesJouables(main, pli, atout) {
   return main.slice();
 }
 
+const estRouge = (couleur) => couleur === "Coeur" || couleur === "Carreau";
+
+/* Ordre des couleurs de la main : on alterne rouge / noir, atout à droite si possible. */
+function ordreCouleurs(presentes, atout) {
+  const perms = (a) => (a.length <= 1 ? [a] : a.flatMap((x, i) => perms([...a.slice(0, i), ...a.slice(i + 1)]).map((p) => [x, ...p])));
+  let best = null, bestKey = null;
+  for (const p of perms(COULEURS.filter((c) => presentes.has(c)))) {
+    let alternances = 0;
+    for (let i = 0; i + 1 < p.length; i++) if (estRouge(p[i]) !== estRouge(p[i + 1])) alternances++;
+    const key = [alternances, p[p.length - 1] === atout ? 1 : 0];
+    if (best === null || cmpCle(key, bestKey) > 0) { best = p; bestKey = key; }
+  }
+  return best || [];
+}
+
 function trierMain(main, atout) {
-  const cle = (c) => [c.c === atout ? 1 : 0, COULEURS.indexOf(c.c), (c.c === atout ? ORD_ATOUT : ORD_PLAIN).indexOf(c.v)];
+  const ordre = ordreCouleurs(new Set(main.map((c) => c.c)), atout);
+  const cle = (c) => [ordre.indexOf(c.c), (c.c === atout ? ORD_ATOUT : ORD_PLAIN).indexOf(c.v)];
   return main.slice().sort((a, b) => cmpCle(cle(a), cle(b)));
 }
 
