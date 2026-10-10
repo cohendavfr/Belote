@@ -64,7 +64,7 @@ button { font: inherit; color: inherit; }
   border-radius: 22px; padding: 14px; color: #f2f6f3;
   display: grid; gap: 10px;
   grid-template-columns: minmax(64px, 1fr) minmax(0, 3.2fr) minmax(64px, 1fr);
-  grid-template-areas: ". haut ." "gauche centre droite" "bas bas bas";
+  grid-template-areas: ". haut ." "gauche centre droite" "moi moi moi" "bas bas bas";
 }
 @media (max-width: 560px) {
   .table { --cw: 40px; --cwm: 52px; padding: 10px; gap: 6px; grid-template-columns: 58px minmax(0, 1fr) 58px; }
@@ -73,7 +73,7 @@ button { font: inherit; color: inherit; }
 .s2 { grid-area: haut; flex-direction: row; justify-content: center; }
 .s1 { grid-area: gauche; justify-content: center; }
 .s3 { grid-area: droite; justify-content: center; }
-.s0 { grid-area: bas; }
+.s0 { grid-area: moi; flex-direction: row; justify-content: center; }
 .plaque { display: inline-flex; align-items: center; gap: 6px; background: #0000004a; border-radius: 999px; padding: 3px 10px; font-weight: 600; font-size: 13px; white-space: nowrap; }
 .plaque.actif { box-shadow: 0 0 0 2px var(--or); background: #0000007a; }
 .donneur { background: var(--or); color: var(--or-fg); border-radius: 50%; width: 18px; height: 18px; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
