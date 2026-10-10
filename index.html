@@ -478,34 +478,93 @@ const COULEUR_VOIX = {
   es: { Coeur: "corazones", Carreau: "diamantes", Trefle: "tréboles", Pique: "picas" },
   ja: { Coeur: "ハート", Carreau: "ダイヤ", Trefle: "クラブ", Pique: "スペード" },
 };
+const NOMS_VOIX = {
+  fr: ["vous", "Ouest", "votre partenaire", "Est"],
+  en: ["you", "West", "your partner", "East"],
+  es: ["usted", "Oeste", "su compañero", "Este"],
+  ja: ["あなた", "西", "パートナー", "東"],
+};
+const hasard = (liste) => liste[Math.floor(Math.random() * liste.length)];
+/* Plusieurs tournures par annonce pour que les joueurs ne répètent pas toujours la même phrase. */
 const PHRASES = {
   fr: {
-    passe: () => "Je passe", prend: (c) => `Je prends à ${c}`,
-    enchere: (v, c) => (v === CAPOT ? `Capot à ${c}` : `${v} ${c}`),
-    coinche: () => "Coinche !", surcoinche: () => "Surcoinche !", belote: () => "Belote", rebelote: () => "Rebelote",
+    passe: () => hasard(["Je passe.", "Pas pour moi.", "Passe.", "Je laisse."]),
+    prend: (c) => hasard([`Je prends à ${c} !`, `Je prends à ${c}.`, `Pour moi, ${c} !`]),
+    enchere: (v, c) => (v === CAPOT ? hasard([`Capot à ${c} !`, `Je tente le capot à ${c} !`]) : hasard([`${v} ${c} !`, `Je dis ${v} ${c}.`, `${v} à ${c}.`])),
+    coinche: () => hasard(["Coinche !", "Je coinche !"]),
+    surcoinche: () => hasard(["Surcoinche !", "Je surcoinche !"]),
+    belote: () => "Belote !", rebelote: () => "Rebelote !",
+    contrat: (c, p, v, mult) => {
+      const nom = NOMS_VOIX.fr[p];
+      if (v === null) return `Atout ${c}, pris par ${nom}.`;
+      const suite = mult === 4 ? ", surcoinché" : mult === 2 ? ", coinché" : "";
+      return v === CAPOT ? `Contrat : capot à ${c}, par ${nom}${suite}.` : `Contrat : ${v} à ${c}, par ${nom}${suite}.`;
+    },
   },
   en: {
-    passe: () => "Pass", prend: (c) => `I take ${c}`,
-    enchere: (v, c) => (v === CAPOT ? `Capot, ${c}` : `${v} ${c}`),
-    coinche: () => "Coinche!", surcoinche: () => "Surcoinche!", belote: () => "Belote", rebelote: () => "Rebelote",
+    passe: () => hasard(["Pass.", "I pass.", "Not for me.", "Pass for me."]),
+    prend: (c) => hasard([`I take ${c}!`, `I'll take ${c}.`, `${c} for me!`]),
+    enchere: (v, c) => (v === CAPOT ? hasard([`Capot in ${c}!`, `I'm going for capot, ${c}!`]) : hasard([`${v} ${c}!`, `I say ${v} ${c}.`, `${v} in ${c}.`])),
+    coinche: () => hasard(["Coinche!", "I coinche!"]),
+    surcoinche: () => hasard(["Surcoinche!", "I surcoinche!"]),
+    belote: () => "Belote!", rebelote: () => "Rebelote!",
+    contrat: (c, p, v, mult) => {
+      const nom = NOMS_VOIX.en[p];
+      if (v === null) return `Trump is ${c}, taken by ${nom}.`;
+      const suite = mult === 4 ? ", surcoinched" : mult === 2 ? ", coinched" : "";
+      return v === CAPOT ? `Contract: capot in ${c}, by ${nom}${suite}.` : `Contract: ${v} in ${c}, by ${nom}${suite}.`;
+    },
   },
   es: {
-    passe: () => "Paso", prend: (c) => `Tomo ${c}`,
-    enchere: (v, c) => (v === CAPOT ? `Capot, ${c}` : `${v} ${c}`),
-    coinche: () => "¡Coinche!", surcoinche: () => "¡Sobrecoinche!", belote: () => "Belote", rebelote: () => "Rebelote",
+    passe: () => hasard(["Paso.", "Yo paso.", "Nada para mí.", "Paso, gracias."]),
+    prend: (c) => hasard([`¡Tomo ${c}!`, `Me quedo con ${c}.`, `¡Yo cojo ${c}!`]),
+    enchere: (v, c) => (v === CAPOT ? hasard([`¡Capot en ${c}!`, `¡Voy a por el capot, ${c}!`]) : hasard([`¡${v} ${c}!`, `Digo ${v} ${c}.`, `${v} en ${c}.`])),
+    coinche: () => hasard(["¡Coinche!", "¡Yo coincho!"]),
+    surcoinche: () => hasard(["¡Sobrecoinche!", "¡Yo sobrecoincho!"]),
+    belote: () => "¡Belote!", rebelote: () => "¡Rebelote!",
+    contrat: (c, p, v, mult) => {
+      const nom = NOMS_VOIX.es[p];
+      if (v === null) return `Triunfo ${c}, lo toma ${nom}.`;
+      const suite = mult === 4 ? ", sobrecoinchado" : mult === 2 ? ", coinchado" : "";
+      return v === CAPOT ? `Contrato: capot en ${c}, de ${nom}${suite}.` : `Contrato: ${v} en ${c}, de ${nom}${suite}.`;
+    },
   },
   ja: {
-    passe: () => "パス", prend: (c) => `${c}で取ります`,
-    enchere: (v, c) => (v === CAPOT ? `カポ、${c}` : `${v}、${c}`),
-    coinche: () => "コアンシュ！", surcoinche: () => "シュルコアンシュ！", belote: () => "ベロット", rebelote: () => "リベロット",
+    passe: () => hasard(["パス！", "パスです。", "見送ります。"]),
+    prend: (c) => hasard([`${c}で取ります！`, `${c}でいきます！`, `${c}にします。`]),
+    enchere: (v, c) => (v === CAPOT ? hasard([`${c}でカポ！`, `カポを狙います、${c}！`]) : hasard([`${v}、${c}！`, `${v}の${c}です。`])),
+    coinche: () => hasard(["コアンシュ！", "コアンシュです！"]),
+    surcoinche: () => hasard(["シュルコアンシュ！", "シュルコアンシュです！"]),
+    belote: () => "ベロット！", rebelote: () => "リベロット！",
+    contrat: (c, p, v, mult) => {
+      const nom = NOMS_VOIX.ja[p];
+      if (v === null) return `切り札は${c}、${nom}が取りました。`;
+      const suite = mult === 4 ? "、シュルコアンシュ" : mult === 2 ? "、コアンシュ" : "";
+      return v === CAPOT ? `契約は${c}でカポ、${nom}${suite}。` : `契約は${c}で${v}、${nom}${suite}。`;
+    },
   },
 };
-const SILENCE_MS = 3000;
+const SILENCE_MS = 2000;
 
+/* Les voix naturelles (Premium, Enhanced, Neural, Google…) passent devant les voix robotiques. */
+function scoreVoix(v) {
+  const n = v.name.toLowerCase();
+  let s = 0;
+  if (/premium|enhanced|neural|natural|online|wavenet/.test(n)) s += 4;
+  if (/google|siri|microsoft/.test(n)) s += 2;
+  if (v.localService === false) s += 1;
+  if (/compact|espeak|novelty|zarvox|bad news|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoids|whisper|wobble|albert|fred|junior|ralph|princess|grandma|grandpa|rocko|shelley|flo|sandy|eddy|reed|bahh/.test(n)) s -= 6;
+  return s;
+}
 function voixPour(p, lang) {
   try {
-    const voix = window.speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().startsWith(lang.slice(0, 2).toLowerCase()));
-    return voix.length ? voix[p % voix.length] : null;
+    const prefixe = lang.slice(0, 2).toLowerCase();
+    const voix = window.speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().replace("_", "-").startsWith(prefixe));
+    if (!voix.length) return null;
+    const classees = voix.slice().sort((a, b) => scoreVoix(b) - scoreVoix(a));
+    const bonnes = classees.filter((v) => scoreVoix(v) >= 0);
+    const liste = bonnes.length ? bonnes : classees;
+    return liste[p % liste.length];
   } catch (e) { return null; }
 }
 function dire(texte, p) {
@@ -513,12 +572,14 @@ function dire(texte, p) {
     if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === "undefined") return res(false);
     const lang = LANGUES[S.voix];
     const u = new SpeechSynthesisUtterance(texte);
-    u.lang = lang; u.pitch = [1, 0.8, 1.25, 0.95][p]; u.rate = 1;
+    u.lang = lang;
+    u.pitch = [1.0, 0.9, 1.12, 1.02][p] + (Math.random() - 0.5) * 0.12;
+    u.rate = 1.05 + (Math.random() - 0.5) * 0.12;
     const v = voixPour(p, lang);
     if (v) u.voice = v;
     let fini = false, t = null;
     const fin = () => { if (!fini) { fini = true; clearTimeout(t); res(true); } };
-    t = setTimeout(fin, 8000);
+    t = setTimeout(fin, 10000);
     u.onend = fin; u.onerror = fin;
     try { window.speechSynthesis.speak(u); } catch (e) { fin(); }
   });
@@ -527,12 +588,11 @@ function silence(ms) {
   const id = S.partieId;
   return new Promise((res, rej) => setTimeout(() => (id === S.partieId ? res() : rej(ANNULE)), ms));
 }
-/* Fait parler le joueur p, puis laisse 3 secondes de silence. Renvoie false si la voix est coupée. */
+/* Fait parler le joueur p, puis laisse 2 secondes de silence. Renvoie false si la voix est coupée. */
 async function annoncer(p, type, ...args) {
   if (S.auto || S.voix === "off") return false;
-  const phrase = PHRASES[S.voix][type];
   const noms = COULEUR_VOIX[S.voix];
-  const texte = phrase(...args.map((a) => (typeof a === "string" && noms[a] ? noms[a] : a)));
+  const texte = PHRASES[S.voix][type](...args.map((a) => (typeof a === "string" && noms[a] ? noms[a] : a)));
   const ok = await dire(texte, p);
   if (ok) await silence(SILENCE_MS);
   return ok;
@@ -707,6 +767,8 @@ async function jouerDonne(donneur) {
     S.retournee = null;
   }
   Object.assign(S, { atout, preneur, contrat, mult, bulles: {}, tour: null });
+  render();
+  if (!(await annoncer(donneur, "contrat", atout, preneur, contrat, mult))) await pause(300);
   bots.forEach((b, p) => b && b.debutDonne(p, atout, preneur));
   render(); await pause(600);
 

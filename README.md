@@ -4,7 +4,7 @@ Belote en Python, dans le terminal : vous et Partenaire contre Ouest et Est (3 b
 
 ## Jouer dans le navigateur
 
-Ouvrir `index.html` dans un navigateur (aucune dépendance, tout est dans le fichier) : table graphique, belote contrat ou coinche, bots simples ou malins. C'est le même moteur que `belote.py`, porté en JavaScript. Les joueurs annoncent leurs enchères à voix haute (français, anglais, espagnol ou japonais, au choix) avec 3 secondes de silence entre chaque annonce, grâce à la synthèse vocale du navigateur ; la qualité des voix dépend du système.
+Ouvrir `index.html` dans un navigateur (aucune dépendance, tout est dans le fichier) : table graphique, belote contrat ou coinche, bots simples ou malins. C'est le même moteur que `belote.py`, porté en JavaScript. Les joueurs annoncent leurs enchères à voix haute (français, anglais, espagnol ou japonais, au choix) avec 2 secondes de silence entre chaque annonce, puis le donneur annonce le contrat retenu, grâce à la synthèse vocale du navigateur ; la qualité des voix dépend du système.
 
 ## Lancer en terminal
 
