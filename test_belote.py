@@ -2,8 +2,7 @@ import random
 import unittest
 
 import belote
-from belote import (Bot, cartes_jouables, gagnant_pli, jouer_donne, points, points_annonces,
-                    resultat, trouver_annonces)
+from belote import Bot, cartes_jouables, gagnant_pli, jouer_donne, points, resultat
 
 
 class TestRegles(unittest.TestCase):
@@ -71,49 +70,59 @@ class TestScore(unittest.TestCase):
         self.assertEqual(r["marque"], [20, 162])
 
 
-class TestAnnonces(unittest.TestCase):
-    def noms(self, main, atout="Pique"):
-        return sorted(a["nom"] for a in trouver_annonces(main, atout))
+class TestCoinche(unittest.TestCase):
+    def test_contrat_rempli_simple(self):
+        r = resultat(0, [100, 62], [5, 3], None, contrat=90)
+        self.assertTrue(r["rempli"])
+        self.assertEqual(r["marque"], [190, 62])
 
-    def test_tierce(self):
-        main = [("7", "Coeur"), ("8", "Coeur"), ("9", "Coeur"), ("As", "Pique")]
-        self.assertEqual(self.noms(main), ["Tierce à 9♥"])
+    def test_contrat_chute_simple(self):
+        r = resultat(0, [70, 92], [4, 4], None, contrat=90)
+        self.assertFalse(r["rempli"])
+        self.assertEqual(r["marque"], [0, 162 + 90])
 
-    def test_cinquante_et_cent(self):
-        quatre = [(v, "Trefle") for v in ("Valet", "Dame", "Roi", "As")]
-        cinq = [(v, "Trefle") for v in ("9", "10", "Valet", "Dame", "Roi")]
-        self.assertEqual(self.noms(quatre), ["Cinquante à As♣"])
-        self.assertEqual(self.noms(cinq), ["Cent à Roi♣"])
+    def test_coinche_rempli(self):
+        r = resultat(0, [100, 62], [5, 3], None, contrat=90, mult=2)
+        self.assertEqual(r["marque"], [(162 + 90) * 2, 0])
 
-    def test_carre_de_valets(self):
-        main = [("Valet", c) for c in belote.COULEURS] + [("7", "Coeur")]
-        a = trouver_annonces(main, "Pique")
-        self.assertEqual([x["points"] for x in a], [200])
+    def test_surcoinche_chute(self):
+        r = resultat(0, [70, 92], [4, 4], None, contrat=90, mult=4)
+        self.assertEqual(r["marque"], [0, (162 + 90) * 4])
 
-    def test_pas_dannonce(self):
-        main = [("7", "Coeur"), ("9", "Coeur"), ("10", "Pique"), ("As", "Trefle")]
-        self.assertEqual(trouver_annonces(main, "Pique"), [])
+    def test_belote_compte_dans_le_contrat(self):
+        r = resultat(0, [70, 92], [4, 4], 0, contrat=90)
+        self.assertTrue(r["rempli"])
+        self.assertEqual(r["marque"], [70 + 90 + 20, 92])
 
-    def test_seule_la_meilleure_equipe_marque(self):
-        tierce_a = [("7", "Coeur"), ("8", "Coeur"), ("9", "Coeur")]
-        cinquante_b = [(v, "Trefle") for v in ("Valet", "Dame", "Roi", "As")]
-        mains = [tierce_a, cinquante_b, [("7", "Pique")], [("8", "Pique")]]
-        _, totaux = points_annonces(mains, "Pique")
-        self.assertEqual(totaux, [0, 50])
+    def test_capot_contrat(self):
+        self.assertTrue(resultat(0, [162, 0], [8, 0], None, contrat=250)["rempli"])
+        self.assertFalse(resultat(0, [152, 10], [7, 1], None, contrat=250)["rempli"])
 
-    def test_atout_departage_deux_tierces(self):
-        t1 = [("7", "Coeur"), ("8", "Coeur"), ("9", "Coeur")]
-        t2 = [("7", "Pique"), ("8", "Pique"), ("9", "Pique")]
-        _, totaux = points_annonces([t1, t2, [], []], "Pique")
-        self.assertEqual(totaux, [0, 20])
+    def test_encheres_scriptees(self):
+        class Scripte:
+            def __init__(self, reponses, coinche=False):
+                self.reponses = iter(reponses)
+                self._coinche = coinche
 
-    def test_annonces_dans_le_score(self):
-        r = resultat(0, [100, 62], [5, 3], None, annonces=(50, 0))
-        self.assertEqual(r["marque"], [150, 62])
+            def enchere(self, main, courant, p):
+                return next(self.reponses, None)
 
-    def test_chute_donne_les_annonces_a_la_defense(self):
-        r = resultat(0, [60, 102], [3, 5], None, annonces=(20, 0))
-        self.assertEqual(r["marque"], [0, 162 + 20])
+            def coinche(self, main, contrat):
+                return self._coinche
+
+            def surcoinche(self, main, contrat):
+                return False
+
+        # donneur 3 : Vous (0) parle en premier
+        joueurs = [Scripte([(80, "Coeur")], coinche=True), Scripte([(90, "Pique")]),
+                   Scripte([]), Scripte([])]
+        res = belote.encheres_coinche(joueurs, [[]] * 4, 3, lambda *_: None)
+        self.assertEqual(res, (1, "Pique", 90, 2))
+
+    def test_tout_le_monde_passe(self):
+        joueurs = [Bot() for _ in range(4)]
+        faible = [("7", "Coeur"), ("8", "Pique"), ("7", "Trefle"), ("8", "Carreau")] * 2
+        self.assertIsNone(belote.encheres_coinche(joueurs, [faible] * 4, 0, lambda *_: None))
 
 
 class TestSimulation(unittest.TestCase):
@@ -129,6 +138,19 @@ class TestSimulation(unittest.TestCase):
             self.assertEqual(sum(res["cartes"]), belote.TOTAL_CARTES)
             self.assertEqual(sum(res["plis"]), 8)
         self.assertGreater(jouees, 100)
+
+    def test_donnes_coinche_automatiques(self):
+        random.seed(7)
+        joueurs = [Bot() for _ in range(4)]
+        jouees = 0
+        for i in range(300):
+            res = jouer_donne(joueurs, i % 4, parler=lambda *_: None, coinche=True)
+            if res is None:
+                continue
+            jouees += 1
+            self.assertEqual(sum(res["cartes"]), belote.TOTAL_CARTES)
+            self.assertIn(res["contrat"], belote.ENCHERES)
+        self.assertGreater(jouees, 50)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Belote contrat à 4 joueurs : vous (0) et Partenaire (2) contre Ouest (1) et Est (3)."""
+"""Belote contrat ou coinche à 4 joueurs : vous (0) et Partenaire (2) contre Ouest (1) et Est (3)."""
 import argparse
 import random
 
@@ -19,6 +19,12 @@ BONUS_DIX_DE_DER = 10
 BONUS_BELOTE = 20
 BONUS_CAPOT = 90
 TOTAL_CARTES = 162
+ENCHERES = [80, 90, 100, 110, 120, 130, 140, 150, 160, 250]  # 250 = capot
+CAPOT = 250
+
+
+def nom_contrat(valeur):
+    return "Capot" if valeur == CAPOT else str(valeur)
 
 
 def creer_jeu():
@@ -86,68 +92,6 @@ def afficher_main(main, atout=None):
     return "  ".join(nom_carte(c) for c in trier_main(main, atout))
 
 
-# --- Annonces ------------------------------------------------------------------
-
-POINTS_SEQUENCE = {3: 20, 4: 50, 5: 100}
-NOMS_SEQUENCE = {3: "Tierce", 4: "Cinquante", 5: "Cent"}
-POINTS_CARRE = {"Valet": 200, "9": 150, "As": 100, "10": 100, "Roi": 100, "Dame": 100}
-
-
-def trouver_annonces(main, atout):
-    """Renvoie les annonces d'une main : liste de dicts (nom, points, rang, atout).
-
-    Les carrés sont pris en premier ; les suites sont cherchées dans les cartes restantes.
-    """
-    annonces = []
-    restantes = list(main)
-    for valeur, pts in POINTS_CARRE.items():
-        if sum(1 for v, _ in main if v == valeur) == 4:
-            annonces.append({"nom": f"Carré de {valeur}", "points": pts,
-                             "rang": ORDRE_PLAIN.index(valeur), "atout": False})
-            restantes = [c for c in restantes if c[0] != valeur]
-    for couleur in COULEURS:
-        indices = sorted(VALEURS.index(v) for v, c in restantes if c == couleur)
-        suite = []
-        for i in indices + [None]:
-            if suite and (i is None or i != suite[-1] + 1):
-                if len(suite) >= 3:
-                    n = len(suite)
-                    pts = POINTS_SEQUENCE[min(n, 5)]
-                    nom = NOMS_SEQUENCE[min(n, 5)]
-                    haute = VALEURS[suite[-1]]
-                    annonces.append({"nom": f"{nom} à {haute}{SYMBOLES[couleur]}", "points": pts,
-                                     "rang": suite[-1], "atout": couleur == atout,
-                                     "longueur": n})
-                suite = []
-            if i is not None:
-                suite.append(i)
-    return annonces
-
-
-def cle_annonce(annonce):
-    """Ordre de comparaison : valeur, hauteur, puis atout."""
-    return (annonce["points"], annonce["rang"], annonce["atout"])
-
-
-def points_annonces(mains, atout):
-    """Renvoie (annonces par joueur, points d'annonces par équipe).
-
-    Seule l'équipe qui détient la meilleure annonce marque ses annonces.
-    """
-    par_joueur = [trouver_annonces(m, atout) for m in mains]
-    meilleures = {}
-    for p, liste in enumerate(par_joueur):
-        for a in liste:
-            if p % 2 not in meilleures or cle_annonce(a) > cle_annonce(meilleures[p % 2]):
-                meilleures[p % 2] = a
-    totaux = [0, 0]
-    if not meilleures:
-        return par_joueur, totaux
-    gagnante = max(meilleures, key=lambda e: cle_annonce(meilleures[e]))
-    totaux[gagnante] = sum(a["points"] for p in range(4) if p % 2 == gagnante for a in par_joueur[p])
-    return par_joueur, totaux
-
-
 # --- Joueurs -----------------------------------------------------------------
 
 class Bot:
@@ -169,6 +113,32 @@ class Bot:
             seuil = 42
         meilleur = max(candidats, key=lambda c: self.valeur_main(main, c))
         return meilleur if self.valeur_main(main, meilleur) >= seuil else None
+
+    def estimation(self, main, couleur):
+        """Contrat qu'on espère réaliser avec cette couleur, arrondi à la dizaine."""
+        return min(160, (40 + self.valeur_main(main, couleur)) // 10 * 10)
+
+    def enchere(self, main, courant, p):
+        """courant = (valeur, couleur, joueur) ou None. Renvoie (valeur, couleur) ou None."""
+        if courant is not None and courant[2] % 2 == p % 2:
+            return None
+        minimum = 80 if courant is None else next((v for v in ENCHERES if v > courant[0]), None)
+        if minimum is None or minimum == CAPOT:
+            return None
+        couleur = max(COULEURS, key=lambda c: self.estimation(main, c))
+        return (minimum, couleur) if self.estimation(main, couleur) >= minimum else None
+
+    def coinche(self, main, contrat):
+        valeur, couleur, _ = contrat
+        atouts = [v for v, c in main if c == couleur]
+        as_ = sum(1 for v, c in main if v == "As" and c != couleur)
+        if valeur < 90:
+            return False
+        return ("Valet" in atouts and "9" in atouts) or ("Valet" in atouts and as_ >= 1 and len(atouts) >= 2)
+
+    def surcoinche(self, main, contrat):
+        valeur, couleur, _ = contrat
+        return self.estimation(main, couleur) >= valeur + 20
 
     def choisir_carte(self, main, jouables, pli, atout):
         if len(jouables) == 1:
@@ -212,6 +182,32 @@ class Humain:
             if rep.isdigit() and 1 <= int(rep) <= len(choix):
                 return choix[int(rep) - 1]
 
+    def enchere(self, main, courant, p):
+        print(f"\nVotre main : {afficher_main(main)}")
+        if courant is not None:
+            print(f"Enchère actuelle : {nom_contrat(courant[0])} {SYMBOLES[courant[1]]} par {NOMS[courant[2]]}")
+        valides = [v for v in ENCHERES if courant is None or v > courant[0]]
+        while True:
+            rep = self._demander(f"Valeur ({', '.join(nom_contrat(v) for v in valides)} ; p = passer) : ")
+            if rep in ("p", "n", ""):
+                return None
+            valeur = CAPOT if rep == "capot" else int(rep) if rep.isdigit() else None
+            if valeur in valides:
+                break
+        while True:
+            rep = self._demander("Couleur : " + ", ".join(f"{i + 1}={SYMBOLES[c]}" for i, c in enumerate(COULEURS)) + " ")
+            if rep.isdigit() and 1 <= int(rep) <= 4:
+                return valeur, COULEURS[int(rep) - 1]
+
+    def coinche(self, main, contrat):
+        print(f"\nVotre main : {afficher_main(main)}")
+        rep = self._demander(f"{NOMS[contrat[2]]} a pris {nom_contrat(contrat[0])} {SYMBOLES[contrat[1]]}. Coincher ? (o/n) ")
+        return rep in ("o", "oui", "y")
+
+    def surcoinche(self, main, contrat):
+        rep = self._demander("Vous êtes coinchés. Surcoincher ? (o/n) ")
+        return rep in ("o", "oui", "y")
+
     def choisir_carte(self, main, jouables, pli, atout):
         if pli:
             print("Pli en cours : " + ", ".join(f"{NOMS[j]} {nom_carte(c)}" for j, c in pli))
@@ -240,38 +236,74 @@ def encheres(joueurs, mains, retournee, donneur, parler):
     return None, None
 
 
-def jouer_donne(joueurs, donneur, parler=print):
+def encheres_coinche(joueurs, mains, donneur, parler):
+    """Enchères de coinche. Renvoie (preneur, atout, valeur, multiplicateur) ou None."""
+    courant = None
+    passes = 0
+    k = 0
+    while True:
+        p = (donneur + 1 + k) % 4
+        k += 1
+        choix = joueurs[p].enchere(mains[p], courant, p)
+        if choix is not None and (courant is None or choix[0] > courant[0]) and choix[0] in ENCHERES:
+            courant = (choix[0], choix[1], p)
+            passes = 0
+            parler(f"{NOMS[p]} annonce {nom_contrat(choix[0])} {SYMBOLES[choix[1]]}.")
+        else:
+            passes += 1
+            parler(f"{NOMS[p]} passe.")
+        if courant is None and passes == 4:
+            return None
+        if courant is not None and passes == 3:
+            break
+    valeur, atout, preneur = courant
+    mult = 1
+    for adv in ((preneur + 1) % 4, (preneur + 3) % 4):
+        if joueurs[adv].coinche(mains[adv], courant):
+            mult = 2
+            parler(f"{NOMS[adv]} COINCHE !")
+            if joueurs[preneur].surcoinche(mains[preneur], courant):
+                mult = 4
+                parler(f"{NOMS[preneur]} SURCOINCHE !")
+            break
+    return preneur, atout, valeur, mult
+
+
+def jouer_donne(joueurs, donneur, parler=print, coinche=False):
     """Joue une donne. Renvoie None si personne ne prend, sinon un dict de résultats."""
     jeu = creer_jeu()
     random.shuffle(jeu)
-    mains = [jeu[i * 5:(i + 1) * 5] for i in range(4)]
-    retournee, reste = jeu[20], jeu[21:]
+    contrat, mult = None, 1
 
-    parler(f"\n=== Donneur : {NOMS[donneur]} — carte retournée : {nom_carte(retournee)} ===")
-    preneur, atout = encheres(joueurs, mains, retournee, donneur, parler)
-    if preneur is None:
-        parler("Personne ne prend : on redistribue.")
-        return None
+    if coinche:
+        mains = [jeu[i * 8:(i + 1) * 8] for i in range(4)]
+        parler(f"\n=== Donneur : {NOMS[donneur]} — coinche ===")
+        res = encheres_coinche(joueurs, mains, donneur, parler)
+        if res is None:
+            parler("Personne n'enchérit : on redistribue.")
+            return None
+        preneur, atout, contrat, mult = res
+        parler(f"Contrat : {nom_contrat(contrat)} {SYMBOLES[atout]} par {NOMS[preneur]}"
+               + {1: "", 2: " (coinché x2)", 4: " (surcoinché x4)"}[mult])
+    else:
+        mains = [jeu[i * 5:(i + 1) * 5] for i in range(4)]
+        retournee, reste = jeu[20], jeu[21:]
+        parler(f"\n=== Donneur : {NOMS[donneur]} — carte retournée : {nom_carte(retournee)} ===")
+        preneur, atout = encheres(joueurs, mains, retournee, donneur, parler)
+        if preneur is None:
+            parler("Personne ne prend : on redistribue.")
+            return None
+        mains[preneur].append(retournee)
+        i = 0
+        for p in range(4):
+            n = 2 if p == preneur else 3
+            mains[p] += reste[i:i + n]
+            i += n
+        parler(f"Atout : {SYMBOLES[atout]} {atout} (pris par {NOMS[preneur]})")
 
-    mains[preneur].append(retournee)
-    i = 0
-    for p in range(4):
-        n = 2 if p == preneur else 3
-        mains[p] += reste[i:i + n]
-        i += n
-
-    belote_equipe = None
-    for p in range(4):
-        if ("Roi", atout) in mains[p] and ("Dame", atout) in mains[p]:
-            belote_equipe = p % 2
-
-    parler(f"Atout : {SYMBOLES[atout]} {atout} (pris par {NOMS[preneur]})")
-
-    annonces_joueurs, annonces = points_annonces(mains, atout)
-    for p in range(4):
-        for a in annonces_joueurs[p]:
-            marque = annonces[p % 2] > 0
-            parler(f"  {NOMS[p]} annonce : {a['nom']} ({a['points']})" + ("" if marque else " — non retenue"))
+    belote_joueur = next((p for p in range(4)
+                          if ("Roi", atout) in mains[p] and ("Dame", atout) in mains[p]), None)
+    belote_equipe = None if belote_joueur is None else belote_joueur % 2
 
     belote_jouees = 0
     cartes = [0, 0]
@@ -288,9 +320,7 @@ def jouer_donne(joueurs, donneur, parler=print):
             pli.append((p, carte))
             if p != 0 or not isinstance(joueurs[0], Humain):
                 parler(f"  {NOMS[p]} joue {nom_carte(carte)}")
-            if belote_equipe == p % 2 and carte in (("Roi", atout), ("Dame", atout)) \
-                    and ("Roi", atout) not in mains[(p + 2) % 4] + mains[(p + 1) % 4] + mains[(p + 3) % 4] \
-                    and ("Dame", atout) not in mains[(p + 2) % 4] + mains[(p + 1) % 4] + mains[(p + 3) % 4]:
+            if p == belote_joueur and carte in (("Roi", atout), ("Dame", atout)):
                 belote_jouees += 1
                 parler("  ... Belote !" if belote_jouees == 1 else "  ... Rebelote !")
         gagnant = gagnant_pli(pli, atout)
@@ -300,38 +330,53 @@ def jouer_donne(joueurs, donneur, parler=print):
         parler(f"Pli {numero + 1} : {NOMS[gagnant]} (+{gain})")
         meneur = gagnant
 
-    return resultat(preneur, cartes, plis, belote_equipe, atout, annonces)
+    return resultat(preneur, cartes, plis, belote_equipe, atout, contrat, mult)
 
 
-def resultat(preneur, cartes, plis, belote_equipe, atout=None, annonces=(0, 0)):
+def resultat(preneur, cartes, plis, belote_equipe, atout=None, contrat=None, mult=1):
+    """Calcule les points d'une donne. contrat=None : belote contrat ; sinon coinche."""
+    eq = preneur % 2
     totaux = list(cartes)
-    for e in (0, 1):
-        totaux[e] += annonces[e]
     if belote_equipe is not None:
         totaux[belote_equipe] += BONUS_BELOTE
-    for e in (0, 1):
-        if plis[e] == 8:
-            totaux[e] += BONUS_CAPOT
 
-    eq = preneur % 2
-    contrat_rempli = totaux[eq] > totaux[1 - eq]
-    marque = list(totaux)
-    if not contrat_rempli:
+    if contrat is None:
+        for e in (0, 1):
+            if plis[e] == 8:
+                totaux[e] += BONUS_CAPOT
+        rempli = totaux[eq] > totaux[1 - eq]
+        marque = list(totaux)
+        if not rempli:
+            marque = [0, 0]
+            marque[1 - eq] = TOTAL_CARTES
+            if belote_equipe is not None:
+                marque[belote_equipe] += BONUS_BELOTE
+    else:
+        rempli = plis[eq] == 8 if contrat == CAPOT else totaux[eq] >= contrat
         marque = [0, 0]
-        marque[1 - eq] = TOTAL_CARTES + sum(annonces)
+        if rempli:
+            if mult == 1:
+                marque[eq] = cartes[eq] + contrat
+                marque[1 - eq] = cartes[1 - eq]
+            else:
+                marque[eq] = (TOTAL_CARTES + contrat) * mult
+        else:
+            marque[1 - eq] = (TOTAL_CARTES + contrat) * mult
         if belote_equipe is not None:
             marque[belote_equipe] += BONUS_BELOTE
+
     return {
-        "preneur": preneur, "atout": atout, "cartes": cartes, "plis": plis,
-        "belote": belote_equipe, "annonces": list(annonces), "totaux": totaux, "marque": marque, "rempli": contrat_rempli,
+        "preneur": preneur, "atout": atout, "contrat": contrat, "mult": mult,
+        "cartes": cartes, "plis": plis, "belote": belote_equipe,
+        "totaux": totaux, "marque": marque, "rempli": rempli,
     }
 
 
-def jouer_partie(joueurs, cible=1000, parler=print):
+def jouer_partie(joueurs, cible=1000, parler=print, coinche=False):
     scores = [0, 0]
     donneur = random.randrange(4)
     while max(scores) < cible:
-        res = jouer_donne(joueurs, donneur, parler)
+        res = jouer_donne(joueurs, donneur, parler, coinche)
         donneur = (donneur + 1) % 4
         if res is None:
             continue
@@ -340,15 +385,15 @@ def jouer_partie(joueurs, cible=1000, parler=print):
         statut = "contrat rempli" if res["rempli"] else "CHUTE du preneur"
         parler(f"→ {statut} ; donne : {res['marque'][0]} - {res['marque'][1]} ; "
                f"total : {EQUIPES[0]} {scores[0]} / {EQUIPES[1]} {scores[1]}")
-    if scores[0] == scores[1]:
-        return scores
-    gagnante = 0 if scores[0] > scores[1] else 1
-    parler(f"\nVictoire de l'équipe {EQUIPES[gagnante]} !")
+    if scores[0] != scores[1]:
+        gagnante = 0 if scores[0] > scores[1] else 1
+        parler(f"\nVictoire de l'équipe {EQUIPES[gagnante]} !")
     return scores
 
 
 def main():
     parser = argparse.ArgumentParser(description="Belote")
+    parser.add_argument("--coinche", action="store_true", help="mode coinche (enchères au point)")
     parser.add_argument("--auto", action="store_true", help="4 bots jouent entre eux")
     parser.add_argument("--seed", type=int, help="graine aléatoire")
     parser.add_argument("--cible", type=int, default=1000, help="score à atteindre (défaut 1000)")
@@ -356,7 +401,7 @@ def main():
     if args.seed is not None:
         random.seed(args.seed)
     joueurs = [Bot() if args.auto else Humain(), Bot(), Bot(), Bot()]
-    jouer_partie(joueurs, args.cible)
+    jouer_partie(joueurs, args.cible, coinche=args.coinche)
 
 
 if __name__ == "__main__":
