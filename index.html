@@ -81,11 +81,11 @@ button { font: inherit; color: inherit; }
 .bulle:empty { visibility: hidden; }
 .bulle .rouge { color: var(--rouge); }
 
-.carte { position: relative; flex: none; width: var(--cw); aspect-ratio: 5 / 7; border-radius: 8px; padding: 0; background: var(--carte); color: var(--encre); border: 1px solid #0003; box-shadow: 0 1px 3px #0005; font-family: var(--font-titre); font-weight: 700; cursor: default; }
+.carte { display: block; position: relative; flex: none; width: var(--cw); aspect-ratio: 5 / 7; border-radius: 8px; padding: 0; background: var(--carte); color: var(--encre); border: 1px solid #0003; box-shadow: 0 1px 3px #0005; font-family: var(--font-titre); font-weight: 700; cursor: default; }
 .carte.rouge { color: var(--rouge); }
-.carte .coin { position: absolute; top: 4px; left: 5px; display: flex; flex-direction: column; align-items: center; line-height: 1; font-size: calc(var(--cw) * 0.3); }
+.carte .coin { position: absolute; top: 4px; left: 5px; display: flex; flex-direction: column; align-items: center; line-height: 1; font-size: calc(var(--cw) * 0.34); }
 .carte .coin i { font-style: normal; font-size: 0.9em; }
-.carte .gros { position: absolute; inset: 0; display: grid; place-items: center; padding-top: 22%; font-size: calc(var(--cw) * 0.62); opacity: 0.9; }
+.carte .gros { position: absolute; inset: 0; display: grid; place-items: center; padding-top: 28%; font-size: calc(var(--cw) * 0.56); opacity: 0.9; }
 .carte.dos { background: repeating-linear-gradient(45deg, var(--feutre-2) 0 6px, #2d7a5c 6px 12px); border: 3px solid var(--carte); }
 .carte.dos .nb { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 18px; text-shadow: 0 1px 3px #000a; }
 .carte.jouable { cursor: pointer; transition: transform 0.12s; }
