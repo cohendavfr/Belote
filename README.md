@@ -2,7 +2,11 @@
 
 Belote en Python, dans le terminal : vous et Partenaire contre Ouest et Est (3 bots). Deux modes : **belote contrat** (par défaut) et **coinche**.
 
-## Lancer
+## Jouer dans le navigateur
+
+Ouvrir `index.html` dans un navigateur (aucune dépendance, tout est dans le fichier) : table graphique, belote contrat ou coinche, bots simples ou malins. C'est le même moteur que `belote.py`, porté en JavaScript.
+
+## Lancer en terminal
 
 ```bash
 python3 belote.py                  # belote contrat, jusqu'à 1000 points

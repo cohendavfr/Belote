@@ -112,10 +112,10 @@ class Bot:
         if tour == 1:
             candidats = [retournee[1]]
             main = main + [retournee]
-            seuil = 45
+            seuil = 38
         else:
             candidats = [c for c in COULEURS if c != retournee[1]]
-            seuil = 42
+            seuil = 34
         meilleur = max(candidats, key=lambda c: self.valeur_main(main, c))
         return meilleur if self.valeur_main(main, meilleur) >= seuil else None
 

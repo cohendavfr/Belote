@@ -1,0 +1,782 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Belote</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap">
+<style>
+/* Mise en page : une table de jeu (haut = Partenaire, côtés = Ouest/Est), votre main en bas, journal à côté. */
+:root {
+  --bg: #eef1ee;
+  --fg: #17201b;
+  --muted: #5a6961;
+  --panel: #ffffff;
+  --line: #cdd7d1;
+  --feutre: #1d5b45;
+  --feutre-2: #154634;
+  --carte: #fbfaf4;
+  --encre: #1a1d1b;
+  --rouge: #c23a2b;
+  --or: #dba93f;
+  --or-fg: #2b1e00;
+  --ok: #1f7a4d;
+  --ko: #b3261e;
+  --font-titre: "Bricolage Grotesque", "Trebuchet MS", system-ui, sans-serif;
+  --font-texte: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1310; --fg: #e5ece7; --muted: #93a39a; --panel: #16211b; --line: #2a382f;
+    --ok: #55c58a; --ko: #f08a80; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1310; --fg: #e5ece7; --muted: #93a39a; --panel: #16211b; --line: #2a382f;
+  --ok: #55c58a; --ko: #f08a80; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.45 var(--font-texte); }
+button { font: inherit; color: inherit; }
+#app { max-width: 1000px; margin: 0 auto; padding-inline: 16px; padding-block: 12px 28px; display: grid; gap: 12px; }
+
+.barre { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.barre h1 { font: 700 26px/1 var(--font-titre); margin: 0; letter-spacing: -0.01em; }
+.scores { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.scores b { font: 700 22px/1 var(--font-titre); }
+.scores span { color: var(--muted); }
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 8px 14px; cursor: pointer; font-weight: 600; }
+.btn:hover { border-color: var(--or); }
+.btn:focus-visible, .carte:focus-visible { outline: 3px solid var(--or); outline-offset: 2px; }
+.btn.or { background: var(--or); color: var(--or-fg); border-color: var(--or); }
+.btn.or:hover { filter: brightness(1.06); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn .rouge { color: var(--rouge); }
+
+.jeu { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@media (min-width: 880px) { .jeu { grid-template-columns: minmax(0, 1fr) 230px; align-items: start; } }
+
+.table {
+  --cw: 50px; --cwm: 66px;
+  background: radial-gradient(120% 90% at 50% 40%, var(--feutre) 0%, var(--feutre-2) 100%);
+  border-radius: 22px; padding: 14px; color: #f2f6f3;
+  display: grid; gap: 10px;
+  grid-template-columns: minmax(64px, 1fr) minmax(0, 3.2fr) minmax(64px, 1fr);
+  grid-template-areas: ". haut ." "gauche centre droite" "bas bas bas";
+}
+@media (max-width: 560px) {
+  .table { --cw: 40px; --cwm: 52px; padding: 10px; gap: 6px; grid-template-columns: 58px minmax(0, 1fr) 58px; }
+}
+.siege { display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; min-width: 0; }
+.s2 { grid-area: haut; flex-direction: row; justify-content: center; }
+.s1 { grid-area: gauche; justify-content: center; }
+.s3 { grid-area: droite; justify-content: center; }
+.s0 { grid-area: bas; }
+.plaque { display: inline-flex; align-items: center; gap: 6px; background: #0000004a; border-radius: 999px; padding: 3px 10px; font-weight: 600; font-size: 13px; white-space: nowrap; }
+.plaque.actif { box-shadow: 0 0 0 2px var(--or); background: #0000007a; }
+.donneur { background: var(--or); color: var(--or-fg); border-radius: 50%; width: 18px; height: 18px; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+.bulle { background: var(--carte); color: var(--encre); border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; min-height: 22px; text-align: center; }
+.bulle:empty { visibility: hidden; }
+.bulle .rouge { color: var(--rouge); }
+
+.carte { position: relative; flex: none; width: var(--cw); aspect-ratio: 5 / 7; border-radius: 8px; padding: 0; background: var(--carte); color: var(--encre); border: 1px solid #0003; box-shadow: 0 1px 3px #0005; font-family: var(--font-titre); font-weight: 700; cursor: default; }
+.carte.rouge { color: var(--rouge); }
+.carte .coin { position: absolute; top: 4px; left: 5px; display: flex; flex-direction: column; align-items: center; line-height: 1; font-size: calc(var(--cw) * 0.3); }
+.carte .coin i { font-style: normal; font-size: 0.9em; }
+.carte .gros { position: absolute; inset: 0; display: grid; place-items: center; padding-top: 22%; font-size: calc(var(--cw) * 0.62); opacity: 0.9; }
+.carte.dos { background: repeating-linear-gradient(45deg, var(--feutre-2) 0 6px, #2d7a5c 6px 12px); border: 3px solid var(--carte); }
+.carte.dos .nb { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 18px; text-shadow: 0 1px 3px #000a; }
+.carte.jouable { cursor: pointer; transition: transform 0.12s; }
+.carte.jouable:hover, .carte.jouable:focus-visible { transform: translateY(-10px); }
+.carte.grise { opacity: 0.5; }
+
+.centre { grid-area: centre; display: grid; gap: 8px; justify-items: center; align-content: start; min-width: 0; }
+.info { min-height: 28px; text-align: center; font-weight: 600; }
+.info .rouge { color: #ff9d8e; }
+.pli { display: grid; gap: 6px; grid-template-columns: repeat(3, var(--cw)); grid-template-rows: repeat(3, calc(var(--cw) * 1.4)); grid-template-areas: ". p2 ." "p1 . p3" ". p0 ."; place-items: center; }
+.pli .p0 { grid-area: p0; } .pli .p1 { grid-area: p1; } .pli .p2 { grid-area: p2; } .pli .p3 { grid-area: p3; }
+.pli .gagnant .carte { box-shadow: 0 0 0 3px var(--or), 0 1px 3px #0005; }
+.pli .carte { animation: pose 0.18s ease-out; }
+@keyframes pose { from { transform: scale(0.8); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .pli .carte { animation: none; } .carte.jouable { transition: none; } }
+.action { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; min-height: 40px; align-items: center; }
+.action .question { flex-basis: 100%; text-align: center; font-weight: 600; }
+.valeurs { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; flex-basis: 100%; }
+.chip { border: 1px solid #ffffff55; background: #0000003a; color: #fff; border-radius: 8px; padding: 5px 10px; cursor: pointer; font-weight: 600; font-variant-numeric: tabular-nums; }
+.chip[aria-pressed="true"] { background: var(--or); color: var(--or-fg); border-color: var(--or); }
+.chip:disabled { opacity: 0.35; cursor: not-allowed; }
+.table .btn { color: var(--fg); }
+
+.main { grid-area: bas; display: flex; justify-content: center; padding-top: 6px; --cw: var(--cwm); min-height: calc(var(--cwm) * 1.4 + 14px); }
+.main .carte + .carte { margin-left: -14px; }
+@media (max-width: 560px) { .main .carte + .carte { margin-left: -22px; } }
+
+.cote { display: grid; gap: 12px; }
+.panneau { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+.panneau h2 { font: 700 15px/1.2 var(--font-titre); margin: 0 0 8px; }
+.journal { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.journal li { color: var(--muted); }
+.journal li:first-child { color: var(--fg); font-weight: 600; }
+details summary { cursor: pointer; font-weight: 600; }
+details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+
+.voile { position: fixed; inset: 0; background: #000a; display: grid; place-items: center; padding: 16px; z-index: 10; overflow: auto; }
+.voile[hidden] { display: none; }
+.fiche { background: var(--panel); color: var(--fg); border-radius: 18px; padding: 20px; width: min(460px, 100%); display: grid; gap: 14px; border: 1px solid var(--line); }
+.fiche h2 { font: 700 22px/1.15 var(--font-titre); margin: 0; text-wrap: balance; }
+.choix { display: grid; gap: 6px; border: 0; padding: 0; margin: 0; }
+.choix legend { font-weight: 600; margin-bottom: 4px; padding: 0; }
+.choix label { display: flex; gap: 8px; align-items: center; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.choix label:has(input:checked) { border-color: var(--or); box-shadow: inset 0 0 0 1px var(--or); }
+.bilan { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.bilan th, .bilan td { padding: 6px 4px; text-align: right; border-bottom: 1px solid var(--line); }
+.bilan th:first-child, .bilan td:first-child { text-align: left; }
+.verdict { font-weight: 700; }
+.verdict.ok { color: var(--ok); } .verdict.ko { color: var(--ko); }
+.rouge { color: var(--rouge); }
+.fiche .rouge { color: var(--rouge); }
+</style>
+
+</head>
+<body>
+<div id="app">
+  <header class="barre">
+    <h1>Belote</h1>
+    <div class="scores" id="scores" aria-live="polite"></div>
+    <button class="btn" id="btn-nouvelle" type="button">Nouvelle partie</button>
+  </header>
+  <div class="jeu">
+    <section class="table" id="table" aria-label="Table de jeu">
+      <div class="siege s2" id="siege-2"></div>
+      <div class="siege s1" id="siege-1"></div>
+      <div class="siege s3" id="siege-3"></div>
+      <div class="centre">
+        <div class="info" id="info"></div>
+        <div class="pli" id="pli"></div>
+        <div class="action" id="action" aria-live="polite"></div>
+      </div>
+      <div class="siege s0" id="siege-0"></div>
+      <div class="main" id="main" aria-label="Votre main"></div>
+    </section>
+    <aside class="cote">
+      <section class="panneau">
+        <h2>Journal</h2>
+        <ul class="journal" id="journal"></ul>
+      </section>
+      <section class="panneau">
+        <details>
+          <summary>Rappel des règles</summary>
+          <p><b>Valeurs à l'atout :</b> Valet 20, 9 14, As 11, 10 10, Roi 4, Dame 3. <b>Hors atout :</b> As 11, 10 10, Roi 4, Dame 3, Valet 2. Dix de der +10, belote-rebelote +20.</p>
+          <p><b>Jeu :</b> fournir la couleur demandée ; sinon couper (sauf si votre partenaire est maître) en montant si possible.</p>
+          <p><b>Belote contrat :</b> le preneur doit marquer plus que ses adversaires. <b>Coinche :</b> contrat de 80 à 160 ou capot ; on peut coincher (×2) puis surcoincher (×4).</p>
+        </details>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<div class="voile" id="voile" hidden><div class="fiche" id="fiche"></div></div>
+
+<script>
+"use strict";
+/* ===================== Moteur (port de belote.py) ===================== */
+const COULEURS = ["Coeur", "Carreau", "Trefle", "Pique"];
+const SYM = { Coeur: "♥", Carreau: "♦", Trefle: "♣", Pique: "♠" };
+const NOM_COULEUR = { Coeur: "cœur", Carreau: "carreau", Trefle: "trèfle", Pique: "pique" };
+const VALEURS = ["7", "8", "9", "10", "Valet", "Dame", "Roi", "As"];
+const ABREGE = { "7": "7", "8": "8", "9": "9", "10": "10", Valet: "V", Dame: "D", Roi: "R", As: "A" };
+const PT_ATOUT = { "7": 0, "8": 0, "9": 14, "10": 10, Valet: 20, Dame: 3, Roi: 4, As: 11 };
+const PT_PLAIN = { "7": 0, "8": 0, "9": 0, "10": 10, Valet: 2, Dame: 3, Roi: 4, As: 11 };
+const ORD_ATOUT = ["7", "8", "Dame", "Roi", "10", "As", "9", "Valet"];
+const ORD_PLAIN = ["7", "8", "9", "Valet", "Dame", "Roi", "10", "As"];
+const NOMS = ["Vous", "Ouest", "Partenaire", "Est"];
+const ENCHERES = [80, 90, 100, 110, 120, 130, 140, 150, 160, 250];
+const CAPOT = 250, TOTAL = 162, DIX_DE_DER = 10, BONUS_BELOTE = 20, BONUS_CAPOT = 90;
+
+const k = (c) => c.v + "|" + c.c;
+const has = (arr, c) => arr.some((x) => x.v === c.v && x.c === c.c);
+const nomContrat = (v) => (v === CAPOT ? "Capot" : String(v));
+const pts = (c, atout) => (c.c === atout ? PT_ATOUT : PT_PLAIN)[c.v];
+const force = (c, atout, dem) => (c.c === atout ? 100 + ORD_ATOUT.indexOf(c.v) : c.c === dem ? ORD_PLAIN.indexOf(c.v) : -1);
+
+function cmpCle(a, b) { for (let i = 0; i < a.length; i++) { if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1; } return 0; }
+function minBy(arr, f) { let best = arr[0], bk = f(best); for (const x of arr.slice(1)) { const kx = f(x); if (cmpCle(kx, bk) < 0) { best = x; bk = kx; } } return best; }
+function maxBy(arr, f) { let best = arr[0], bk = f(best); for (const x of arr.slice(1)) { const kx = f(x); if (cmpCle(kx, bk) > 0) { best = x; bk = kx; } } return best; }
+
+function creerJeu() { const j = []; for (const c of COULEURS) for (const v of VALEURS) j.push({ v, c }); return j; }
+function melanger(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+function gagnantPli(pli, atout) {
+  const dem = pli[0].carte.c;
+  let best = pli[0];
+  for (const x of pli.slice(1)) if (force(x.carte, atout, dem) > force(best.carte, atout, dem)) best = x;
+  return best.j;
+}
+
+function cartesJouables(main, pli, atout) {
+  if (!pli.length) return main.slice();
+  const dem = pli[0].carte.c;
+  const meilleure = Math.max(...pli.map((x) => force(x.carte, atout, dem)));
+  const meme = main.filter((c) => c.c === dem);
+  if (meme.length) {
+    if (dem === atout) {
+      const hautes = meme.filter((c) => force(c, atout, dem) > meilleure);
+      return hautes.length ? hautes : meme;
+    }
+    return meme;
+  }
+  const joueur = (pli[0].j + pli.length) % 4;
+  if (gagnantPli(pli, atout) === (joueur + 2) % 4) return main.slice();
+  const atouts = main.filter((c) => c.c === atout);
+  if (atouts.length) {
+    const forts = atouts.filter((c) => force(c, atout, dem) > meilleure);
+    return forts.length ? forts : atouts;
+  }
+  return main.slice();
+}
+
+function trierMain(main, atout) {
+  const cle = (c) => [c.c === atout ? 1 : 0, COULEURS.indexOf(c.c), (c.c === atout ? ORD_ATOUT : ORD_PLAIN).indexOf(c.v)];
+  return main.slice().sort((a, b) => cmpCle(cle(a), cle(b)));
+}
+
+/* ---- Bots ---- */
+class Bot {
+  debutDonne(moi, atout, preneur) { this.moi = moi; this.atout = atout; this.preneur = preneur; }
+  valeurMain(main, couleur) {
+    const cs = main.filter((c) => c.c === couleur);
+    let t = cs.reduce((s, c) => s + PT_ATOUT[c.v], 0);
+    if (cs.length >= 3) t += 10;
+    t += 5 * main.filter((c) => c.v === "As" && c.c !== couleur).length;
+    return t;
+  }
+  prise(main, retournee, tour) {
+    let candidats, seuil, m = main;
+    if (tour === 1) { candidats = [retournee.c]; m = main.concat([retournee]); seuil = 38; }
+    else { candidats = COULEURS.filter((c) => c !== retournee.c); seuil = 34; }
+    const meilleur = maxBy(candidats, (c) => [this.valeurMain(m, c)]);
+    return this.valeurMain(m, meilleur) >= seuil ? meilleur : null;
+  }
+  estimation(main, couleur) { return Math.min(160, Math.floor((40 + this.valeurMain(main, couleur)) / 10) * 10); }
+  enchere(main, courant, p) {
+    if (courant && courant.j % 2 === p % 2) return null;
+    const minimum = courant === null ? 80 : ENCHERES.find((v) => v > courant.valeur);
+    if (minimum === undefined || minimum === CAPOT) return null;
+    const couleur = maxBy(COULEURS, (c) => [this.estimation(main, c)]);
+    return this.estimation(main, couleur) >= minimum ? { valeur: minimum, couleur } : null;
+  }
+  coinche(main, contrat) {
+    const atouts = main.filter((c) => c.c === contrat.couleur).map((c) => c.v);
+    const as_ = main.filter((c) => c.v === "As" && c.c !== contrat.couleur).length;
+    if (contrat.valeur < 90) return false;
+    return (atouts.includes("Valet") && atouts.includes("9")) || (atouts.includes("Valet") && as_ >= 1 && atouts.length >= 2);
+  }
+  surcoinche(main, contrat) { return this.estimation(main, contrat.couleur) >= contrat.valeur + 20; }
+  choisirCarte(main, jouables, pli, atout) {
+    if (jouables.length === 1) return jouables[0];
+    const dem = pli.length ? pli[0].carte.c : null;
+    if (!pli.length) {
+      const v = jouables.find((c) => c.v === "Valet" && c.c === atout);
+      if (v) return v;
+      const as_ = jouables.filter((c) => c.v === "As" && c.c !== atout);
+      if (as_.length) return as_[0];
+      return minBy(jouables, (c) => [pts(c, atout), force(c, atout, c.c)]);
+    }
+    const courant = gagnantPli(pli, atout);
+    const joueur = (pli[0].j + pli.length) % 4;
+    if (courant === (joueur + 2) % 4) return maxBy(jouables, (c) => [pts(c, atout)]);
+    const meilleure = Math.max(...pli.map((x) => force(x.carte, atout, dem)));
+    const gagnantes = jouables.filter((c) => force(c, atout, dem) > meilleure);
+    if (gagnantes.length) return minBy(gagnantes, (c) => [force(c, atout, dem)]);
+    return minBy(jouables, (c) => [pts(c, atout), force(c, atout, c.c)]);
+  }
+}
+
+class BotMalin extends Bot {
+  valeurMain(main, couleur) {
+    let t = super.valeurMain(main, couleur);
+    const at = main.filter((c) => c.c === couleur).map((c) => c.v);
+    if (at.includes("Valet") && at.includes("9")) t += 10;
+    if (at.includes("Roi") && at.includes("Dame")) t += 10;
+    if (at.length >= 5) t += 10;
+    return t;
+  }
+  enchere(main, courant, p) {
+    if (courant && courant.j % 2 === p % 2) return this.soutien(main, courant);
+    return super.enchere(main, courant, p);
+  }
+  soutien(main, courant) {
+    const at = main.filter((c) => c.c === courant.couleur).map((c) => c.v);
+    const suivant = ENCHERES.find((v) => v > courant.valeur);
+    if (suivant === undefined || suivant > 120) return null;
+    const aces = main.filter((c) => c.v === "As" && c.c !== courant.couleur).length;
+    const f = at.reduce((s, v) => s + PT_ATOUT[v], 0);
+    if (at.length >= 2 && (at.includes("Valet") || at.includes("9")) && f + 5 * aces >= 30) return { valeur: suivant, couleur: courant.couleur };
+    return null;
+  }
+  estMaitre(carte, atout, connues, main) {
+    const ordre = carte.c === atout ? ORD_ATOUT : ORD_PLAIN;
+    return ordre.slice(ordre.indexOf(carte.v) + 1).every((v) => connues.has(v + "|" + carte.c) || has(main, { v, c: carte.c }));
+  }
+  choisirCarte(main, jouables, pli, atout, vus) {
+    if (jouables.length === 1) return jouables[0];
+    const connues = new Set(vus.map((x) => k(x.carte)).concat(pli.map((x) => k(x.carte))));
+    const dehors = ORD_ATOUT.map((v) => ({ v, c: atout })).filter((c) => !connues.has(k(c)) && !has(main, c));
+    const moi = pli.length ? (pli[0].j + pli.length) % 4 : this.moi;
+    const attaquant = this.preneur % 2 === moi % 2;
+    if (!pli.length) return this.entame(main, jouables, atout, connues, dehors, attaquant);
+    const dem = pli[0].carte.c;
+    const courant = gagnantPli(pli, atout);
+    const meilleure = Math.max(...pli.map((x) => force(x.carte, atout, dem)));
+    const dernier = pli.length === 3;
+    if (courant === (moi + 2) % 4) {
+      const cp = pli.find((x) => x.j === courant).carte;
+      const sur = dernier || (this.estMaitre(cp, atout, connues, main) && (cp.c === atout || dehors.length === 0));
+      if (sur) return maxBy(jouables, (c) => [pts(c, atout), -force(c, atout, c.c)]);
+      return minBy(jouables, (c) => [pts(c, atout), force(c, atout, c.c)]);
+    }
+    const gagnantes = jouables.filter((c) => force(c, atout, dem) > meilleure);
+    if (gagnantes.length) {
+      const enjeu = pli.reduce((s, x) => s + pts(x.carte, atout), 0);
+      const coupe = gagnantes[0].c === atout && dem !== atout;
+      if (!coupe || dernier || enjeu >= 10) return minBy(gagnantes, (c) => [force(c, atout, dem)]);
+    }
+    return minBy(jouables, (c) => [pts(c, atout), force(c, atout, c.c)]);
+  }
+  entame(main, jouables, atout, connues, dehors, attaquant) {
+    if (attaquant && dehors.length) {
+      const maitres = jouables.filter((c) => c.c === atout && this.estMaitre(c, atout, connues, main));
+      if (maitres.length) return maxBy(maitres, (c) => [force(c, atout, atout)]);
+    }
+    const maitres = jouables.filter((c) => c.c !== atout && this.estMaitre(c, atout, connues, main));
+    if (maitres.length) return maxBy(maitres, (c) => [pts(c, atout)]);
+    const pool = jouables.filter((c) => c.c !== atout);
+    return minBy(pool.length ? pool : jouables, (c) => [pts(c, atout), force(c, atout, c.c)]);
+  }
+}
+
+function resultat(preneur, cartes, plis, beloteEquipe, atout, contrat, mult) {
+  const eq = preneur % 2;
+  const totaux = cartes.slice();
+  if (beloteEquipe !== null) totaux[beloteEquipe] += BONUS_BELOTE;
+  let rempli, marque;
+  if (contrat === null) {
+    for (const e of [0, 1]) if (plis[e] === 8) totaux[e] += BONUS_CAPOT;
+    rempli = totaux[eq] > totaux[1 - eq];
+    marque = totaux.slice();
+    if (!rempli) {
+      marque = [0, 0];
+      marque[1 - eq] = TOTAL;
+      if (beloteEquipe !== null) marque[beloteEquipe] += BONUS_BELOTE;
+    }
+  } else {
+    rempli = contrat === CAPOT ? plis[eq] === 8 : totaux[eq] >= contrat;
+    marque = [0, 0];
+    if (rempli) {
+      if (mult === 1) { marque[eq] = cartes[eq] + contrat; marque[1 - eq] = cartes[1 - eq]; }
+      else marque[eq] = (TOTAL + contrat) * mult;
+    } else marque[1 - eq] = (TOTAL + contrat) * mult;
+    if (beloteEquipe !== null) marque[beloteEquipe] += BONUS_BELOTE;
+  }
+  return { preneur, atout, contrat, mult, cartes, plis, belote: beloteEquipe, totaux, marque, rempli };
+}
+
+/* ===================== État et interface ===================== */
+const $ = (s) => document.querySelector(s);
+const S = {
+  mode: "belote", niveau: "malin", cible: 1000, rapide: false, auto: false,
+  scores: [0, 0], donneur: 0, mains: [[], [], [], []], pli: [], vus: [], atout: null, preneur: null,
+  contrat: null, mult: 1, retournee: null, tour: null, gagnant: null, bulles: {}, journal: [],
+  partieId: 0, attenteCarte: null, enchereCourante: null,
+};
+const ANNULE = { annule: true };
+
+function carteHtml(c, extra) {
+  const rouge = c.c === "Coeur" || c.c === "Carreau";
+  return `<span class="carte ${rouge ? "rouge" : ""} ${extra || ""}"><span class="coin"><b>${ABREGE[c.v]}</b><i>${SYM[c.c]}</i></span><span class="gros">${SYM[c.c]}</span></span>`;
+}
+const symHtml = (couleur) => `<span class="${couleur === "Coeur" || couleur === "Carreau" ? "rouge" : ""}">${SYM[couleur]}</span>`;
+
+function log(msg) { S.journal.unshift(msg); if (S.journal.length > 10) S.journal.pop(); renderJournal(); }
+
+function render() {
+  if (S.auto) return;
+  $("#scores").innerHTML = `<span>Nous</span> <b>${S.scores[0]}</b> <span>Eux</span> <b>${S.scores[1]}</b> <span>objectif ${S.cible}</span>`;
+  for (let p = 0; p < 4; p++) {
+    const plaque = `<span class="plaque ${S.tour === p ? "actif" : ""}">${NOMS[p]}${S.donneur === p ? '<span class="donneur" title="Donneur">D</span>' : ""}</span>`;
+    const bulle = `<div class="bulle">${S.bulles[p] || ""}</div>`;
+    let corps;
+    if (p === 0) corps = plaque + bulle;
+    else corps = `${plaque}<span class="carte dos"><span class="nb">${S.mains[p].length}</span></span>${bulle}`;
+    $("#siege-" + p).innerHTML = corps;
+  }
+  // centre
+  let info = "";
+  if (S.mode === "coinche" && S.enchereCourante && S.atout === null) {
+    info = `Enchère : ${nomContrat(S.enchereCourante.valeur)} ${symHtml(S.enchereCourante.couleur)} (${NOMS[S.enchereCourante.j]})`;
+  } else if (S.atout) {
+    const ctr = S.contrat ? `${nomContrat(S.contrat)} ` : "";
+    const mult = S.mult === 2 ? " · coinché ×2" : S.mult === 4 ? " · surcoinché ×4" : "";
+    info = `Atout ${symHtml(S.atout)} · ${ctr}${NOMS[S.preneur]}${mult}`;
+  } else if (S.retournee) {
+    info = `Carte retournée : ${carteHtml(S.retournee, "").replace('class="carte', 'style="display:inline-block;width:30px;vertical-align:middle" class="carte')}`;
+  }
+  if (S.toast) info = S.toast;
+  $("#info").innerHTML = info;
+  let pli = "";
+  for (const x of S.pli) pli += `<div class="p${x.j} ${S.gagnant === x.j ? "gagnant" : ""}">${carteHtml(x.carte)}</div>`;
+  if (!S.pli.length && S.retournee && S.atout === null) pli = `<div class="p0" style="grid-area:2/2">${carteHtml(S.retournee)}</div>`;
+  $("#pli").innerHTML = pli;
+  // main
+  const main = trierMain(S.mains[0], S.atout);
+  const att = S.attenteCarte;
+  $("#main").innerHTML = main.map((c) => {
+    const rouge = c.c === "Coeur" || c.c === "Carreau";
+    const jouable = att && has(att.jouables, c);
+    const cls = `carte ${rouge ? "rouge" : ""} ${att ? (jouable ? "jouable" : "grise") : ""}`;
+    const label = `${c.v} de ${NOM_COULEUR[c.c]}`;
+    return `<button type="button" class="${cls}" data-k="${k(c)}" aria-label="${label}" ${jouable ? "" : "disabled"}><span class="coin"><b>${ABREGE[c.v]}</b><i>${SYM[c.c]}</i></span><span class="gros">${SYM[c.c]}</span></button>`;
+  }).join("");
+}
+function renderJournal() { if (!S.auto) $("#journal").innerHTML = S.journal.map((m) => `<li>${m}</li>`).join(""); }
+
+$("#main").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-k]");
+  if (!b || !S.attenteCarte) return;
+  const att = S.attenteCarte;
+  const c = att.jouables.find((x) => k(x) === b.dataset.k);
+  if (!c) return;
+  S.attenteCarte = null;
+  att.resolve(c);
+});
+
+function pause(ms) {
+  const id = S.partieId;
+  if (S.auto) return Promise.resolve();
+  return new Promise((res, rej) => setTimeout(() => (id === S.partieId ? res() : rej(ANNULE)), S.rapide ? ms / 2.5 : ms));
+}
+
+/* ---- Interactions humaines ---- */
+function attendre(construire) {
+  const id = S.partieId;
+  return new Promise((res) => {
+    const zone = $("#action");
+    zone.innerHTML = "";
+    construire(zone, (v) => { if (id !== S.partieId) return; zone.innerHTML = ""; res(v); });
+  });
+}
+function bouton(txt, cls, fn, html) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "btn " + (cls || "");
+  if (html) b.innerHTML = txt; else b.textContent = txt;
+  b.addEventListener("click", fn);
+  return b;
+}
+function question(zone, txt) { const q = document.createElement("div"); q.className = "question"; q.textContent = txt; zone.appendChild(q); }
+
+function humainPrise(retournee, tour) {
+  return attendre((zone, fin) => {
+    if (tour === 1) {
+      question(zone, "Prendre à la couleur retournée ?");
+      zone.appendChild(bouton(`Prendre à ${symHtml(retournee.c)}`, "or", () => fin(retournee.c), true));
+      zone.appendChild(bouton("Passer", "", () => fin(null)));
+    } else {
+      question(zone, "Choisir un atout ?");
+      for (const c of COULEURS.filter((x) => x !== retournee.c)) zone.appendChild(bouton(`${symHtml(c)} ${NOM_COULEUR[c]}`, "or", () => fin(c), true));
+      zone.appendChild(bouton("Passer", "", () => fin(null)));
+    }
+  });
+}
+function humainEnchere(courant) {
+  return attendre((zone, fin) => {
+    question(zone, "Votre enchère");
+    let choisie = null;
+    const vals = document.createElement("div"); vals.className = "valeurs";
+    const suits = document.createElement("div"); suits.className = "valeurs";
+    const chips = [];
+    for (const v of ENCHERES) {
+      const ch = document.createElement("button");
+      ch.type = "button"; ch.className = "chip"; ch.textContent = nomContrat(v);
+      ch.setAttribute("aria-pressed", "false");
+      ch.disabled = !!courant && v <= courant.valeur;
+      ch.addEventListener("click", () => {
+        choisie = v;
+        chips.forEach((x) => x.setAttribute("aria-pressed", String(x === ch)));
+        suitBtns.forEach((b) => (b.disabled = false));
+      });
+      chips.push(ch); vals.appendChild(ch);
+    }
+    const suitBtns = COULEURS.map((c) => {
+      const b = bouton(`${symHtml(c)} ${NOM_COULEUR[c]}`, "or", () => fin({ valeur: choisie, couleur: c }), true);
+      b.disabled = true; suits.appendChild(b); return b;
+    });
+    zone.appendChild(vals); zone.appendChild(suits);
+    zone.appendChild(bouton("Passer", "", () => fin(null)));
+  });
+}
+function humainOuiNon(q, oui, non) {
+  return attendre((zone, fin) => {
+    question(zone, q);
+    zone.appendChild(bouton(oui, "or", () => fin(true)));
+    zone.appendChild(bouton(non, "", () => fin(false)));
+  });
+}
+function humainCarte(jouables) {
+  return new Promise((res) => {
+    S.attenteCarte = { jouables, resolve: res };
+    $("#action").innerHTML = '<div class="question">À vous de jouer</div>';
+    render();
+  }).then((c) => { $("#action").innerHTML = ""; return c; });
+}
+
+/* ---- Déroulement d'une donne ---- */
+const estHumain = (p) => p === 0 && !S.auto;
+let bots = [];
+
+async function encheresBelote(mains, retournee, donneur) {
+  for (const tour of [1, 2]) {
+    if (tour === 2) S.bulles = {};
+    for (let kk = 0; kk < 4; kk++) {
+      const p = (donneur + 1 + kk) % 4;
+      S.tour = p; render();
+      let choix;
+      if (estHumain(p)) choix = await humainPrise(retournee, tour);
+      else { await pause(800); choix = bots[p].prise(mains[p], retournee, tour); }
+      if (choix) {
+        S.bulles[p] = `Prend à ${symHtml(choix)}`;
+        log(`${NOMS[p]} prend à ${SYM[choix]} ${NOM_COULEUR[choix]}.`);
+        S.tour = null; render(); await pause(900);
+        return { preneur: p, atout: choix };
+      }
+      S.bulles[p] = "Passe"; log(`${NOMS[p]} passe.`); render();
+    }
+  }
+  return null;
+}
+
+async function encheresCoinche(mains, donneur) {
+  let courant = null, passes = 0, kk = 0;
+  while (true) {
+    const p = (donneur + 1 + kk) % 4; kk++;
+    S.tour = p; render();
+    let choix;
+    if (estHumain(p)) choix = await humainEnchere(courant);
+    else { await pause(800); choix = bots[p].enchere(mains[p], courant, p); }
+    if (choix && (courant === null || choix.valeur > courant.valeur) && ENCHERES.includes(choix.valeur)) {
+      courant = { valeur: choix.valeur, couleur: choix.couleur, j: p };
+      S.enchereCourante = courant; passes = 0;
+      S.bulles[p] = `${nomContrat(choix.valeur)} ${symHtml(choix.couleur)}`;
+      log(`${NOMS[p]} annonce ${nomContrat(choix.valeur)} ${SYM[choix.couleur]}.`);
+    } else { passes++; S.bulles[p] = "Passe"; log(`${NOMS[p]} passe.`); }
+    render();
+    if (courant === null && passes === 4) return null;
+    if (courant !== null && passes === 3) break;
+  }
+  S.tour = null;
+  const preneur = courant.j;
+  let mult = 1;
+  for (const adv of [(preneur + 1) % 4, (preneur + 3) % 4]) {
+    S.tour = adv; render();
+    let coinche;
+    if (estHumain(adv)) coinche = await humainOuiNon(`${NOMS[preneur]} a pris ${nomContrat(courant.valeur)} ${SYM[courant.couleur]}. Coincher ?`, "Coincher (×2)", "Laisser");
+    else { await pause(700); coinche = bots[adv].coinche(mains[adv], courant); }
+    if (coinche) {
+      mult = 2; S.bulles[adv] = "Coinche !"; log(`${NOMS[adv]} coinche !`); render();
+      let sur;
+      S.tour = preneur; render();
+      if (estHumain(preneur)) sur = await humainOuiNon("Vous êtes coinchés. Surcoincher ?", "Surcoincher (×4)", "Laisser");
+      else { await pause(700); sur = bots[preneur].surcoinche(mains[preneur], courant); }
+      if (sur) { mult = 4; S.bulles[preneur] = "Surcoinche !"; log(`${NOMS[preneur]} surcoinche !`); }
+      break;
+    }
+  }
+  S.tour = null; render();
+  return { preneur, atout: courant.couleur, valeur: courant.valeur, mult };
+}
+
+async function jouerDonne(donneur) {
+  const jeu = melanger(creerJeu());
+  Object.assign(S, { pli: [], vus: [], atout: null, preneur: null, contrat: null, mult: 1, retournee: null, tour: null, gagnant: null, bulles: {}, enchereCourante: null, toast: null, donneur });
+  let mains, preneur, atout, contrat = null, mult = 1;
+
+  if (S.mode === "coinche") {
+    mains = [0, 1, 2, 3].map((i) => jeu.slice(i * 8, i * 8 + 8));
+    S.mains = mains; log(`Nouvelle donne. Donneur : ${NOMS[donneur]}.`); render(); await pause(500);
+    const r = await encheresCoinche(mains, donneur);
+    if (!r) { log("Personne n'enchérit : on redistribue."); S.bulles = {}; render(); await pause(1200); return null; }
+    ({ preneur, atout, valeur: contrat, mult } = r);
+  } else {
+    mains = [0, 1, 2, 3].map((i) => jeu.slice(i * 5, i * 5 + 5));
+    const retournee = jeu[20], reste = jeu.slice(21);
+    S.mains = mains; S.retournee = retournee; log(`Nouvelle donne. Donneur : ${NOMS[donneur]}.`); render(); await pause(500);
+    const r = await encheresBelote(mains, retournee, donneur);
+    if (!r) { log("Personne ne prend : on redistribue."); S.retournee = null; S.bulles = {}; render(); await pause(1200); return null; }
+    ({ preneur, atout } = r);
+    mains[preneur].push(retournee);
+    let i = 0;
+    for (let p = 0; p < 4; p++) { const n = p === preneur ? 2 : 3; mains[p].push(...reste.slice(i, i + n)); i += n; }
+    S.retournee = null;
+  }
+  Object.assign(S, { atout, preneur, contrat, mult, bulles: {}, tour: null });
+  bots.forEach((b, p) => b && b.debutDonne(p, atout, preneur));
+  render(); await pause(600);
+
+  const beloteJoueur = [0, 1, 2, 3].find((p) => has(mains[p], { v: "Roi", c: atout }) && has(mains[p], { v: "Dame", c: atout }));
+  const beloteEquipe = beloteJoueur === undefined ? null : beloteJoueur % 2;
+  let beloteJouees = 0;
+  const cartes = [0, 0], plis = [0, 0];
+  let meneur = (donneur + 1) % 4;
+
+  for (let numero = 0; numero < 8; numero++) {
+    S.pli = []; S.gagnant = null;
+    for (let kk = 0; kk < 4; kk++) {
+      const p = (meneur + kk) % 4;
+      const jouables = cartesJouables(mains[p], S.pli, atout);
+      S.tour = p; render();
+      let carte;
+      if (estHumain(p)) {
+        carte = jouables.length === 1 && false ? jouables[0] : await humainCarte(jouables);
+      } else {
+        await pause(650);
+        carte = bots[p].choisirCarte(mains[p], jouables, S.pli.slice(), atout, S.vus.slice());
+      }
+      mains[p].splice(mains[p].findIndex((c) => k(c) === k(carte)), 1);
+      S.pli.push({ j: p, carte });
+      if (p === beloteJoueur && ((carte.v === "Roi" || carte.v === "Dame") && carte.c === atout)) {
+        beloteJouees++;
+        const t = beloteJouees === 1 ? "Belote !" : "Rebelote !";
+        log(`${NOMS[p]} : ${t}`); S.toast = `${NOMS[p]} : ${t}`; setTimeout(() => { S.toast = null; render(); }, 1600);
+      }
+      S.tour = null; render();
+    }
+    const gagnant = gagnantPli(S.pli, atout);
+    const gain = S.pli.reduce((s, x) => s + pts(x.carte, atout), 0) + (numero === 7 ? DIX_DE_DER : 0);
+    cartes[gagnant % 2] += gain; plis[gagnant % 2]++;
+    S.gagnant = gagnant; render();
+    log(`Pli ${numero + 1} : ${NOMS[gagnant]} (+${gain})`);
+    await pause(1300);
+    S.vus.push(...S.pli);
+    meneur = gagnant;
+  }
+  S.pli = []; S.gagnant = null; render();
+  return resultat(preneur, cartes, plis, beloteEquipe, atout, contrat, mult);
+}
+
+/* ---- Fiches (menu, bilan, fin) ---- */
+function afficherFiche(html) { $("#fiche").innerHTML = html; $("#voile").hidden = false; }
+function cacherFiche() { $("#voile").hidden = true; }
+function attendreFiche(html, idBouton) {
+  const id = S.partieId;
+  return new Promise((res) => {
+    afficherFiche(html);
+    $("#" + idBouton).addEventListener("click", () => { cacherFiche(); if (id === S.partieId) res(); }, { once: true });
+    $("#" + idBouton).focus();
+  });
+}
+
+function bilanHtml(r) {
+  const eq = r.preneur % 2;
+  const nomEq = (e) => (e === 0 ? "Nous" : "Eux");
+  const ligneBelote = r.belote !== null ? `<tr><td>Belote-rebelote</td><td>${r.belote === 0 ? "+20" : ""}</td><td>${r.belote === 1 ? "+20" : ""}</td></tr>` : "";
+  const contratTxt = r.contrat === null ? `Atout ${symHtml(r.atout)}` : `Contrat ${nomContrat(r.contrat)} ${symHtml(r.atout)}${r.mult > 1 ? ` ×${r.mult}` : ""}`;
+  const nous = r.preneur % 2 === 0;
+  const verdict = r.rempli
+    ? `<span class="verdict ${nous ? "ok" : "ko"}">Contrat rempli par ${nomEq(eq)}</span>`
+    : `<span class="verdict ${nous ? "ko" : "ok"}">Chute de ${nomEq(eq)}</span>`;
+  return `<h2>Fin de la donne</h2>
+    <div>${contratTxt}, pris par ${NOMS[r.preneur]}. ${verdict}.</div>
+    <table class="bilan"><thead><tr><th></th><th>Nous</th><th>Eux</th></tr></thead><tbody>
+      <tr><td>Plis gagnés</td><td>${r.plis[0]}</td><td>${r.plis[1]}</td></tr>
+      <tr><td>Points des cartes (dix de der compris)</td><td>${r.cartes[0]}</td><td>${r.cartes[1]}</td></tr>
+      ${ligneBelote}
+      <tr><td><b>Marqué</b></td><td><b>${r.marque[0]}</b></td><td><b>${r.marque[1]}</b></td></tr>
+    </tbody></table>`;
+}
+
+async function jouerPartie() {
+  const id = ++S.partieId;
+  S.scores = [0, 0]; S.journal = []; S.attenteCarte = null; S.mains = [[], [], [], []];
+  $("#action").innerHTML = ""; renderJournal();
+  const Cls = S.niveau === "malin" ? BotMalin : Bot;
+  bots = [null, new Cls(), new Cls(), new Cls()];
+  let donneur = Math.floor(Math.random() * 4);
+  try {
+    while (Math.max(...S.scores) < S.cible) {
+      const r = await jouerDonne(donneur);
+      donneur = (donneur + 1) % 4;
+      if (!r) continue;
+      S.scores[0] += r.marque[0]; S.scores[1] += r.marque[1]; render();
+      const fin = Math.max(...S.scores) >= S.cible;
+      await attendreFiche(bilanHtml(r) + `<button class="btn or" id="suite" type="button">${fin ? "Voir le résultat" : "Donne suivante"}</button>`, "suite");
+    }
+    const gagne = S.scores[0] > S.scores[1];
+    const egal = S.scores[0] === S.scores[1];
+    await attendreFiche(`<h2>${egal ? "Égalité" : gagne ? "Victoire !" : "Défaite"}</h2>
+      <div>Nous <b>${S.scores[0]}</b> · Eux <b>${S.scores[1]}</b></div>
+      <button class="btn or" id="rejouer" type="button">Nouvelle partie</button>`, "rejouer");
+    menu();
+  } catch (e) { if (e !== ANNULE) throw e; }
+}
+
+function lireReglages() {
+  try { return JSON.parse(localStorage.getItem("belote-reglages") || "{}"); } catch (e) { return {}; }
+}
+function ecrireReglages() {
+  try { localStorage.setItem("belote-reglages", JSON.stringify({ mode: S.mode, niveau: S.niveau, cible: S.cible, rapide: S.rapide })); } catch (e) { /* stockage indisponible */ }
+}
+
+function menu() {
+  S.partieId++; S.attenteCarte = null;
+  const radio = (nom, val, lib, coche) => `<label><input type="radio" name="${nom}" value="${val}" ${coche ? "checked" : ""}> ${lib}</label>`;
+  afficherFiche(`<h2>Belote</h2>
+    <p style="margin:0;color:var(--muted)">Vous et Partenaire contre Ouest et Est.</p>
+    <fieldset class="choix"><legend>Mode</legend>
+      ${radio("mode", "belote", "Belote contrat", S.mode === "belote")}
+      ${radio("mode", "coinche", "Coinche (enchères au point)", S.mode === "coinche")}
+    </fieldset>
+    <fieldset class="choix"><legend>Adversaires</legend>
+      ${radio("niveau", "malin", "Malins : ils retiennent les cartes", S.niveau === "malin")}
+      ${radio("niveau", "simple", "Simples", S.niveau === "simple")}
+    </fieldset>
+    <fieldset class="choix"><legend>Objectif</legend>
+      ${radio("cible", "500", "500 points (partie courte)", S.cible === 500)}
+      ${radio("cible", "1000", "1000 points", S.cible === 1000)}
+    </fieldset>
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="rapide" ${S.rapide ? "checked" : ""}> Rythme rapide</label>
+    <button class="btn or" id="jouer" type="button">Jouer</button>`);
+  $("#jouer").addEventListener("click", () => {
+    const val = (n) => document.querySelector(`input[name="${n}"]:checked`).value;
+    S.mode = val("mode"); S.niveau = val("niveau"); S.cible = Number(val("cible")); S.rapide = $("#rapide").checked;
+    ecrireReglages(); cacherFiche(); jouerPartie();
+  });
+  $("#jouer").focus();
+}
+
+$("#btn-nouvelle").addEventListener("click", menu);
+{ const r = lireReglages(); if (r.mode) S.mode = r.mode; if (r.niveau) S.niveau = r.niveau; if (r.cible) S.cible = r.cible; S.rapide = !!r.rapide; }
+render();
+menu();
+
+/* Simulation sans interface, pour vérifier le moteur depuis la console. */
+window.__belote = {
+  async simuler(n, mode) {
+    const avant = { mode: S.mode, auto: S.auto };
+    S.auto = true; S.mode = mode; S.partieId++;
+    const stats = { donnes: 0, redistribuees: 0, ecartTotal: 0, remplis: 0 };
+    bots = [new BotMalin(), new BotMalin(), new BotMalin(), new BotMalin()];
+    for (let i = 0; i < n; i++) {
+      const r = await jouerDonne(i % 4);
+      stats.donnes++;
+      if (!r) { stats.redistribuees++; continue; }
+      if (r.cartes[0] + r.cartes[1] !== TOTAL) stats.ecartTotal++;
+      if (r.rempli) stats.remplis++;
+    }
+    S.auto = avant.auto; S.mode = avant.mode;
+    return stats;
+  },
+};
+</script>
+</body>
+</html>
