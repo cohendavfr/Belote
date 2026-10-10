@@ -399,7 +399,7 @@ const S = {
   mode: "belote", niveau: "malin", cible: 1000, rapide: false, auto: false,
   scores: [0, 0], donneur: 0, mains: [[], [], [], []], pli: [], vus: [], atout: null, preneur: null,
   contrat: null, mult: 1, retournee: null, tour: null, gagnant: null, bulles: {}, journal: [],
-  partieId: 0, attenteCarte: null, enchereCourante: null,
+  partieId: 0, attenteCarte: null, enchereCourante: null, voix: "fr",
 };
 const ANNULE = { annule: true };
 
@@ -469,6 +469,75 @@ function pause(ms) {
   if (S.auto) return Promise.resolve();
   return new Promise((res, rej) => setTimeout(() => (id === S.partieId ? res() : rej(ANNULE)), S.rapide ? ms / 2.5 : ms));
 }
+
+/* ---- Voix des joueurs (synthèse vocale du navigateur) ---- */
+const LANGUES = { fr: "fr-FR", en: "en-US", es: "es-ES", ja: "ja-JP" };
+const COULEUR_VOIX = {
+  fr: { Coeur: "cœur", Carreau: "carreau", Trefle: "trèfle", Pique: "pique" },
+  en: { Coeur: "hearts", Carreau: "diamonds", Trefle: "clubs", Pique: "spades" },
+  es: { Coeur: "corazones", Carreau: "diamantes", Trefle: "tréboles", Pique: "picas" },
+  ja: { Coeur: "ハート", Carreau: "ダイヤ", Trefle: "クラブ", Pique: "スペード" },
+};
+const PHRASES = {
+  fr: {
+    passe: () => "Je passe", prend: (c) => `Je prends à ${c}`,
+    enchere: (v, c) => (v === CAPOT ? `Capot à ${c}` : `${v} ${c}`),
+    coinche: () => "Coinche !", surcoinche: () => "Surcoinche !", belote: () => "Belote", rebelote: () => "Rebelote",
+  },
+  en: {
+    passe: () => "Pass", prend: (c) => `I take ${c}`,
+    enchere: (v, c) => (v === CAPOT ? `Capot, ${c}` : `${v} ${c}`),
+    coinche: () => "Coinche!", surcoinche: () => "Surcoinche!", belote: () => "Belote", rebelote: () => "Rebelote",
+  },
+  es: {
+    passe: () => "Paso", prend: (c) => `Tomo ${c}`,
+    enchere: (v, c) => (v === CAPOT ? `Capot, ${c}` : `${v} ${c}`),
+    coinche: () => "¡Coinche!", surcoinche: () => "¡Sobrecoinche!", belote: () => "Belote", rebelote: () => "Rebelote",
+  },
+  ja: {
+    passe: () => "パス", prend: (c) => `${c}で取ります`,
+    enchere: (v, c) => (v === CAPOT ? `カポ、${c}` : `${v}、${c}`),
+    coinche: () => "コアンシュ！", surcoinche: () => "シュルコアンシュ！", belote: () => "ベロット", rebelote: () => "リベロット",
+  },
+};
+const SILENCE_MS = 3000;
+
+function voixPour(p, lang) {
+  try {
+    const voix = window.speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().startsWith(lang.slice(0, 2).toLowerCase()));
+    return voix.length ? voix[p % voix.length] : null;
+  } catch (e) { return null; }
+}
+function dire(texte, p) {
+  return new Promise((res) => {
+    if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === "undefined") return res(false);
+    const lang = LANGUES[S.voix];
+    const u = new SpeechSynthesisUtterance(texte);
+    u.lang = lang; u.pitch = [1, 0.8, 1.25, 0.95][p]; u.rate = 1;
+    const v = voixPour(p, lang);
+    if (v) u.voice = v;
+    let fini = false, t = null;
+    const fin = () => { if (!fini) { fini = true; clearTimeout(t); res(true); } };
+    t = setTimeout(fin, 8000);
+    u.onend = fin; u.onerror = fin;
+    try { window.speechSynthesis.speak(u); } catch (e) { fin(); }
+  });
+}
+function silence(ms) {
+  const id = S.partieId;
+  return new Promise((res, rej) => setTimeout(() => (id === S.partieId ? res() : rej(ANNULE)), ms));
+}
+/* Fait parler le joueur p, puis laisse 3 secondes de silence. Renvoie false si la voix est coupée. */
+async function annoncer(p, type, ...args) {
+  if (S.auto || S.voix === "off") return false;
+  const phrase = PHRASES[S.voix][type];
+  const noms = COULEUR_VOIX[S.voix];
+  const texte = phrase(...args.map((a) => (typeof a === "string" && noms[a] ? noms[a] : a)));
+  const ok = await dire(texte, p);
+  if (ok) await silence(SILENCE_MS);
+  return ok;
+}
+const reflechir = () => pause(S.voix === "off" || S.auto ? 800 : 300);
 
 /* ---- Interactions humaines ---- */
 function attendre(construire) {
@@ -555,14 +624,16 @@ async function encheresBelote(mains, retournee, donneur) {
       S.tour = p; render();
       let choix;
       if (estHumain(p)) choix = await humainPrise(retournee, tour);
-      else { await pause(800); choix = bots[p].prise(mains[p], retournee, tour); }
+      else { await reflechir(); choix = bots[p].prise(mains[p], retournee, tour); }
       if (choix) {
         S.bulles[p] = `Prend à ${symHtml(choix)}`;
         log(`${NOMS[p]} prend à ${SYM[choix]} ${NOM_COULEUR[choix]}.`);
-        S.tour = null; render(); await pause(900);
+        S.tour = null; render();
+        if (!(await annoncer(p, "prend", choix))) await pause(900);
         return { preneur: p, atout: choix };
       }
       S.bulles[p] = "Passe"; log(`${NOMS[p]} passe.`); render();
+      await annoncer(p, "passe");
     }
   }
   return null;
@@ -575,14 +646,17 @@ async function encheresCoinche(mains, donneur) {
     S.tour = p; render();
     let choix;
     if (estHumain(p)) choix = await humainEnchere(courant);
-    else { await pause(800); choix = bots[p].enchere(mains[p], courant, p); }
+    else { await reflechir(); choix = bots[p].enchere(mains[p], courant, p); }
+    let parole;
     if (choix && (courant === null || choix.valeur > courant.valeur) && ENCHERES.includes(choix.valeur)) {
       courant = { valeur: choix.valeur, couleur: choix.couleur, j: p };
       S.enchereCourante = courant; passes = 0;
       S.bulles[p] = `${nomContrat(choix.valeur)} ${symHtml(choix.couleur)}`;
       log(`${NOMS[p]} annonce ${nomContrat(choix.valeur)} ${SYM[choix.couleur]}.`);
-    } else { passes++; S.bulles[p] = "Passe"; log(`${NOMS[p]} passe.`); }
+      parole = ["enchere", choix.valeur, choix.couleur];
+    } else { passes++; S.bulles[p] = "Passe"; log(`${NOMS[p]} passe.`); parole = ["passe"]; }
     render();
+    await annoncer(p, ...parole);
     if (courant === null && passes === 4) return null;
     if (courant !== null && passes === 3) break;
   }
@@ -593,14 +667,15 @@ async function encheresCoinche(mains, donneur) {
     S.tour = adv; render();
     let coinche;
     if (estHumain(adv)) coinche = await humainOuiNon(`${NOMS[preneur]} a pris ${nomContrat(courant.valeur)} ${SYM[courant.couleur]}. Coincher ?`, "Coincher (×2)", "Laisser");
-    else { await pause(700); coinche = bots[adv].coinche(mains[adv], courant); }
+    else { await reflechir(); coinche = bots[adv].coinche(mains[adv], courant); }
     if (coinche) {
       mult = 2; S.bulles[adv] = "Coinche !"; log(`${NOMS[adv]} coinche !`); render();
+      await annoncer(adv, "coinche");
       let sur;
       S.tour = preneur; render();
       if (estHumain(preneur)) sur = await humainOuiNon("Vous êtes coinchés. Surcoincher ?", "Surcoincher (×4)", "Laisser");
-      else { await pause(700); sur = bots[preneur].surcoinche(mains[preneur], courant); }
-      if (sur) { mult = 4; S.bulles[preneur] = "Surcoinche !"; log(`${NOMS[preneur]} surcoinche !`); }
+      else { await reflechir(); sur = bots[preneur].surcoinche(mains[preneur], courant); }
+      if (sur) { mult = 4; S.bulles[preneur] = "Surcoinche !"; log(`${NOMS[preneur]} surcoinche !`); render(); await annoncer(preneur, "surcoinche"); }
       break;
     }
   }
@@ -660,6 +735,8 @@ async function jouerDonne(donneur) {
         beloteJouees++;
         const t = beloteJouees === 1 ? "Belote !" : "Rebelote !";
         log(`${NOMS[p]} : ${t}`); S.toast = `${NOMS[p]} : ${t}`; setTimeout(() => { S.toast = null; render(); }, 1600);
+        render();
+        await annoncer(p, beloteJouees === 1 ? "belote" : "rebelote");
       }
       S.tour = null; render();
     }
@@ -709,6 +786,7 @@ function bilanHtml(r) {
 
 async function jouerPartie() {
   const id = ++S.partieId;
+  arreterVoix();
   S.scores = [0, 0]; S.journal = []; S.attenteCarte = null; S.mains = [[], [], [], []];
   $("#action").innerHTML = ""; renderJournal();
   const Cls = S.niveau === "malin" ? BotMalin : Bot;
@@ -736,11 +814,13 @@ function lireReglages() {
   try { return JSON.parse(localStorage.getItem("belote-reglages") || "{}"); } catch (e) { return {}; }
 }
 function ecrireReglages() {
-  try { localStorage.setItem("belote-reglages", JSON.stringify({ mode: S.mode, niveau: S.niveau, cible: S.cible, rapide: S.rapide })); } catch (e) { /* stockage indisponible */ }
+  try { localStorage.setItem("belote-reglages", JSON.stringify({ mode: S.mode, niveau: S.niveau, cible: S.cible, rapide: S.rapide, voix: S.voix })); } catch (e) { /* stockage indisponible */ }
 }
 
+function arreterVoix() { try { window.speechSynthesis.cancel(); } catch (e) { /* pas de synthèse vocale */ } }
+
 function menu() {
-  S.partieId++; S.attenteCarte = null;
+  S.partieId++; S.attenteCarte = null; arreterVoix();
   const radio = (nom, val, lib, coche) => `<label><input type="radio" name="${nom}" value="${val}" ${coche ? "checked" : ""}> ${lib}</label>`;
   afficherFiche(`<h2>Belote</h2>
     <p style="margin:0;color:var(--muted)">Vous et Partenaire contre Ouest et Est.</p>
@@ -756,18 +836,27 @@ function menu() {
       ${radio("cible", "500", "500 points (partie courte)", S.cible === 500)}
       ${radio("cible", "1000", "1000 points", S.cible === 1000)}
     </fieldset>
+    <fieldset class="choix"><legend>Voix des joueurs</legend>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px">
+        ${radio("voix", "fr", "Français", S.voix === "fr")}
+        ${radio("voix", "en", "English", S.voix === "en")}
+        ${radio("voix", "es", "Español", S.voix === "es")}
+        ${radio("voix", "ja", "日本語", S.voix === "ja")}
+        ${radio("voix", "off", "Sans voix", S.voix === "off")}
+      </div>
+    </fieldset>
     <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="rapide" ${S.rapide ? "checked" : ""}> Rythme rapide</label>
     <button class="btn or" id="jouer" type="button">Jouer</button>`);
   $("#jouer").addEventListener("click", () => {
     const val = (n) => document.querySelector(`input[name="${n}"]:checked`).value;
-    S.mode = val("mode"); S.niveau = val("niveau"); S.cible = Number(val("cible")); S.rapide = $("#rapide").checked;
+    S.mode = val("mode"); S.niveau = val("niveau"); S.cible = Number(val("cible")); S.voix = val("voix"); S.rapide = $("#rapide").checked;
     ecrireReglages(); cacherFiche(); jouerPartie();
   });
   $("#jouer").focus();
 }
 
 $("#btn-nouvelle").addEventListener("click", menu);
-{ const r = lireReglages(); if (r.mode) S.mode = r.mode; if (r.niveau) S.niveau = r.niveau; if (r.cible) S.cible = r.cible; S.rapide = !!r.rapide; }
+{ const r = lireReglages(); if (r.mode) S.mode = r.mode; if (r.niveau) S.niveau = r.niveau; if (r.cible) S.cible = r.cible; if (r.voix) S.voix = r.voix; S.rapide = !!r.rapide; }
 render();
 menu();
 
