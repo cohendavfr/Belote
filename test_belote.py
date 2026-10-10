@@ -2,7 +2,7 @@ import random
 import unittest
 
 import belote
-from belote import Bot, cartes_jouables, gagnant_pli, jouer_donne, points, resultat
+from belote import Bot, BotMalin, cartes_jouables, gagnant_pli, jouer_donne, points, resultat
 
 
 class TestRegles(unittest.TestCase):
@@ -125,6 +125,48 @@ class TestCoinche(unittest.TestCase):
         self.assertIsNone(belote.encheres_coinche(joueurs, [faible] * 4, 0, lambda *_: None))
 
 
+class TestBotMalin(unittest.TestCase):
+    def bot(self, moi=0, preneur=0, atout="Pique"):
+        b = BotMalin()
+        b.debut_donne(moi, atout, preneur)
+        return b
+
+    def test_est_maitre(self):
+        connues = {("As", "Coeur")}
+        self.assertTrue(BotMalin.est_maitre(("10", "Coeur"), "Pique", connues, []))
+        self.assertFalse(BotMalin.est_maitre(("Roi", "Coeur"), "Pique", set(), []))
+        # le 9 d'atout est maître une fois le valet tombé
+        self.assertTrue(BotMalin.est_maitre(("9", "Pique"), "Pique", {("Valet", "Pique")}, []))
+
+    def test_entame_atout_maitre_en_attaque(self):
+        main = [("Valet", "Pique"), ("7", "Coeur"), ("8", "Trefle")]
+        carte = self.bot().choisir_carte(main, main, [], "Pique", [])
+        self.assertEqual(carte, ("Valet", "Pique"))
+
+    def test_entame_as_en_defense(self):
+        main = [("As", "Coeur"), ("7", "Coeur"), ("8", "Trefle")]
+        carte = self.bot(moi=0, preneur=1).choisir_carte(main, main, [], "Pique", [])
+        self.assertEqual(carte, ("As", "Coeur"))
+
+    def test_charge_quand_le_partenaire_est_maitre(self):
+        main = [("10", "Coeur"), ("7", "Coeur")]
+        pli = [(1, ("8", "Coeur")), (2, ("As", "Coeur")), (3, ("9", "Coeur"))]
+        carte = self.bot(moi=0).choisir_carte(main, main, pli, "Pique", [])
+        self.assertEqual(carte, ("10", "Coeur"))
+
+    def test_ne_coupe_pas_un_pli_sans_enjeu(self):
+        main = [("7", "Pique"), ("8", "Trefle")]
+        pli = [(1, ("7", "Coeur")), (2, ("8", "Coeur"))]
+        jouables = cartes_jouables(main, pli, "Pique")
+        carte = self.bot(moi=3, preneur=1).choisir_carte(main, jouables, pli, "Pique", [])
+        self.assertEqual(carte, ("7", "Pique"))  # obligé de couper : seule carte jouable
+
+    def test_soutien_du_partenaire(self):
+        main = [("Valet", "Pique"), ("9", "Pique"), ("As", "Coeur")] + [("7", "Trefle")] * 2
+        res = BotMalin().enchere(main, (80, "Pique", 2), 0)
+        self.assertEqual(res, (90, "Pique"))
+
+
 class TestSimulation(unittest.TestCase):
     def test_donnes_automatiques(self):
         random.seed(42)
@@ -138,6 +180,18 @@ class TestSimulation(unittest.TestCase):
             self.assertEqual(sum(res["cartes"]), belote.TOTAL_CARTES)
             self.assertEqual(sum(res["plis"]), 8)
         self.assertGreater(jouees, 100)
+
+    def test_malin_bat_simple(self):
+        random.seed(11)
+        total = [0, 0]
+        for i in range(600):
+            eq = i % 2
+            joueurs = [BotMalin() if p % 2 == eq else Bot() for p in range(4)]
+            res = jouer_donne(joueurs, (i // 2) % 4, parler=lambda *_: None)
+            if res is not None:
+                total[0] += res["marque"][eq]
+                total[1] += res["marque"][1 - eq]
+        self.assertGreater(total[0], total[1])
 
     def test_donnes_coinche_automatiques(self):
         random.seed(7)

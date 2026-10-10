@@ -95,6 +95,11 @@ def afficher_main(main, atout=None):
 # --- Joueurs -----------------------------------------------------------------
 
 class Bot:
+    """Bot simple : aucune mémoire des plis précédents."""
+
+    def debut_donne(self, moi, atout, preneur):
+        self.moi, self.atout, self.preneur = moi, atout, preneur
+
     def valeur_main(self, main, couleur):
         cartes = [c for c in main if c[1] == couleur]
         total = sum(POINTS_ATOUT[v] for v, _ in cartes)
@@ -140,7 +145,7 @@ class Bot:
         valeur, couleur, _ = contrat
         return self.estimation(main, couleur) >= valeur + 20
 
-    def choisir_carte(self, main, jouables, pli, atout):
+    def choisir_carte(self, main, jouables, pli, atout, vus=()):
         if len(jouables) == 1:
             return jouables[0]
         demandee = pli[0][1][1] if pli else None
@@ -163,7 +168,95 @@ class Bot:
         return min(jouables, key=lambda c: (points(c, atout), force(c, atout, demandee)))
 
 
+class BotMalin(Bot):
+    """Bot avec mémoire des cartes jouées, cartes maîtresses, jeu en attaque/défense."""
+
+    def valeur_main(self, main, couleur):
+        total = super().valeur_main(main, couleur)
+        atouts = {v for v, c in main if c == couleur}
+        if "Valet" in atouts and "9" in atouts:
+            total += 10
+        if "Roi" in atouts and "Dame" in atouts:
+            total += 10
+        if len(atouts) >= 5:
+            total += 10
+        return total
+
+    def enchere(self, main, courant, p):
+        if courant is not None and courant[2] % 2 == p % 2:
+            return self.soutien(main, courant)
+        return super().enchere(main, courant, p)
+
+    def soutien(self, main, courant):
+        """Relève le contrat du partenaire quand on a de bons atouts."""
+        valeur, couleur, _ = courant
+        atouts = {v for v, c in main if c == couleur}
+        suivant = next((v for v in ENCHERES if v > valeur), None)
+        if suivant is None or suivant > 120:
+            return None
+        aces = sum(1 for v, c in main if v == "As" and c != couleur)
+        force_atouts = sum(POINTS_ATOUT[v] for v in atouts)
+        if len(atouts) >= 2 and ("Valet" in atouts or "9" in atouts) and force_atouts + 5 * aces >= 30:
+            return suivant, couleur
+        return None
+
+    @staticmethod
+    def est_maitre(carte, atout, connues, main):
+        couleur = carte[1]
+        ordre = ORDRE_ATOUT if couleur == atout else ORDRE_PLAIN
+        hautes = [(v, couleur) for v in ordre[ordre.index(carte[0]) + 1:]]
+        return all(h in connues or h in main for h in hautes)
+
+    def choisir_carte(self, main, jouables, pli, atout, vus=()):
+        if len(jouables) == 1:
+            return jouables[0]
+        connues = {c for _, c in vus} | {c for _, c in pli}
+        atouts_dehors = [(v, atout) for v in ORDRE_ATOUT
+                         if (v, atout) not in connues and (v, atout) not in main]
+        moi = (pli[0][0] + len(pli)) % 4 if pli else self.moi
+        attaquant = self.preneur % 2 == moi % 2
+
+        if not pli:
+            return self.entame(main, jouables, atout, connues, atouts_dehors, attaquant)
+
+        demandee = pli[0][1][1]
+        courant = gagnant_pli(pli, atout)
+        meilleure = max(force(c, atout, demandee) for _, c in pli)
+        dernier = len(pli) == 3
+        if courant == (moi + 2) % 4:
+            carte_partenaire = next(c for j, c in pli if j == courant)
+            sur = dernier or (
+                self.est_maitre(carte_partenaire, atout, connues, main)
+                and (carte_partenaire[1] == atout or not atouts_dehors)
+            )
+            if sur:
+                return max(jouables, key=lambda c: (points(c, atout), -force(c, atout, c[1])))
+            return min(jouables, key=lambda c: (points(c, atout), force(c, atout, c[1])))
+
+        gagnantes = [c for c in jouables if force(c, atout, demandee) > meilleure]
+        if gagnantes:
+            enjeu = sum(points(c, atout) for _, c in pli)
+            coupe = gagnantes[0][1] == atout and demandee != atout
+            if not coupe or dernier or enjeu >= 10:
+                return min(gagnantes, key=lambda c: force(c, atout, demandee))
+        return min(jouables, key=lambda c: (points(c, atout), force(c, atout, c[1])))
+
+    def entame(self, main, jouables, atout, connues, atouts_dehors, attaquant):
+        if attaquant and atouts_dehors:
+            maitres = [c for c in jouables if c[1] == atout and self.est_maitre(c, atout, connues, main)]
+            if maitres:
+                return max(maitres, key=lambda c: force(c, atout, atout))
+        maitres = [c for c in jouables if c[1] != atout and self.est_maitre(c, atout, connues, main)]
+        if maitres:
+            return max(maitres, key=lambda c: points(c, atout))
+        pool = [c for c in jouables if c[1] != atout] or jouables
+        return min(pool, key=lambda c: (points(c, atout), force(c, atout, c[1])))
+
+
 class Humain:
+    def debut_donne(self, moi, atout, preneur):
+        pass
+
     def _demander(self, texte):
         return input(texte).strip().lower()
 
@@ -208,7 +301,7 @@ class Humain:
         rep = self._demander("Vous êtes coinchés. Surcoincher ? (o/n) ")
         return rep in ("o", "oui", "y")
 
-    def choisir_carte(self, main, jouables, pli, atout):
+    def choisir_carte(self, main, jouables, pli, atout, vus=()):
         if pli:
             print("Pli en cours : " + ", ".join(f"{NOMS[j]} {nom_carte(c)}" for j, c in pli))
         main = trier_main(main, atout)
@@ -305,6 +398,10 @@ def jouer_donne(joueurs, donneur, parler=print, coinche=False):
                           if ("Roi", atout) in mains[p] and ("Dame", atout) in mains[p]), None)
     belote_equipe = None if belote_joueur is None else belote_joueur % 2
 
+    for p, j in enumerate(joueurs):
+        j.debut_donne(p, atout, preneur)
+
+    vus = []
     belote_jouees = 0
     cartes = [0, 0]
     plis = [0, 0]
@@ -314,7 +411,7 @@ def jouer_donne(joueurs, donneur, parler=print, coinche=False):
         for k in range(4):
             p = (meneur + k) % 4
             jouables = cartes_jouables(mains[p], pli, atout)
-            carte = joueurs[p].choisir_carte(mains[p], jouables, pli, atout)
+            carte = joueurs[p].choisir_carte(mains[p], jouables, pli, atout, vus)
             assert carte in jouables
             mains[p].remove(carte)
             pli.append((p, carte))
@@ -328,6 +425,7 @@ def jouer_donne(joueurs, donneur, parler=print, coinche=False):
         cartes[gagnant % 2] += gain
         plis[gagnant % 2] += 1
         parler(f"Pli {numero + 1} : {NOMS[gagnant]} (+{gain})")
+        vus.extend(pli)
         meneur = gagnant
 
     return resultat(preneur, cartes, plis, belote_equipe, atout, contrat, mult)
@@ -394,13 +492,15 @@ def jouer_partie(joueurs, cible=1000, parler=print, coinche=False):
 def main():
     parser = argparse.ArgumentParser(description="Belote")
     parser.add_argument("--coinche", action="store_true", help="mode coinche (enchères au point)")
+    parser.add_argument("--bots", choices=["malin", "simple"], default="malin", help="niveau des bots")
     parser.add_argument("--auto", action="store_true", help="4 bots jouent entre eux")
     parser.add_argument("--seed", type=int, help="graine aléatoire")
     parser.add_argument("--cible", type=int, default=1000, help="score à atteindre (défaut 1000)")
     args = parser.parse_args()
     if args.seed is not None:
         random.seed(args.seed)
-    joueurs = [Bot() if args.auto else Humain(), Bot(), Bot(), Bot()]
+    bot = BotMalin if args.bots == "malin" else Bot
+    joueurs = [bot() if args.auto else Humain(), bot(), bot(), bot()]
     jouer_partie(joueurs, args.cible, coinche=args.coinche)
 
 
