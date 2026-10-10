@@ -205,6 +205,8 @@ function cmpCle(a, b) { for (let i = 0; i < a.length; i++) { if (a[i] !== b[i]) 
 function minBy(arr, f) { let best = arr[0], bk = f(best); for (const x of arr.slice(1)) { const kx = f(x); if (cmpCle(kx, bk) < 0) { best = x; bk = kx; } } return best; }
 function maxBy(arr, f) { let best = arr[0], bk = f(best); for (const x of arr.slice(1)) { const kx = f(x); if (cmpCle(kx, bk) > 0) { best = x; bk = kx; } } return best; }
 
+/* Les joueurs tournent dans le sens anti-horaire : Vous (0) → Est (3) → Partenaire (2) → Ouest (1). */
+const apres = (depart, n) => (depart + 3 * n) % 4;
 function creerJeu() { const j = []; for (const c of COULEURS) for (const v of VALEURS) j.push({ v, c }); return j; }
 function melanger(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 
@@ -227,7 +229,7 @@ function cartesJouables(main, pli, atout) {
     }
     return meme;
   }
-  const joueur = (pli[0].j + pli.length) % 4;
+  const joueur = apres(pli[0].j, pli.length);
   if (gagnantPli(pli, atout) === (joueur + 2) % 4) return main.slice();
   const atouts = main.filter((c) => c.c === atout);
   if (atouts.length) {
@@ -285,7 +287,7 @@ class Bot {
       return minBy(jouables, (c) => [pts(c, atout), force(c, atout, c.c)]);
     }
     const courant = gagnantPli(pli, atout);
-    const joueur = (pli[0].j + pli.length) % 4;
+    const joueur = apres(pli[0].j, pli.length);
     if (courant === (joueur + 2) % 4) return maxBy(jouables, (c) => [pts(c, atout)]);
     const meilleure = Math.max(...pli.map((x) => force(x.carte, atout, dem)));
     const gagnantes = jouables.filter((c) => force(c, atout, dem) > meilleure);
@@ -324,7 +326,7 @@ class BotMalin extends Bot {
     if (jouables.length === 1) return jouables[0];
     const connues = new Set(vus.map((x) => k(x.carte)).concat(pli.map((x) => k(x.carte))));
     const dehors = ORD_ATOUT.map((v) => ({ v, c: atout })).filter((c) => !connues.has(k(c)) && !has(main, c));
-    const moi = pli.length ? (pli[0].j + pli.length) % 4 : this.moi;
+    const moi = pli.length ? apres(pli[0].j, pli.length) : this.moi;
     const attaquant = this.preneur % 2 === moi % 2;
     if (!pli.length) return this.entame(main, jouables, atout, connues, dehors, attaquant);
     const dem = pli[0].carte.c;
@@ -539,7 +541,7 @@ async function encheresBelote(mains, retournee, donneur) {
   for (const tour of [1, 2]) {
     if (tour === 2) S.bulles = {};
     for (let kk = 0; kk < 4; kk++) {
-      const p = (donneur + 1 + kk) % 4;
+      const p = apres(donneur, 1 + kk);
       S.tour = p; render();
       let choix;
       if (estHumain(p)) choix = await humainPrise(retournee, tour);
@@ -559,7 +561,7 @@ async function encheresBelote(mains, retournee, donneur) {
 async function encheresCoinche(mains, donneur) {
   let courant = null, passes = 0, kk = 0;
   while (true) {
-    const p = (donneur + 1 + kk) % 4; kk++;
+    const p = apres(donneur, 1 + kk); kk++;
     S.tour = p; render();
     let choix;
     if (estHumain(p)) choix = await humainEnchere(courant);
@@ -577,7 +579,7 @@ async function encheresCoinche(mains, donneur) {
   S.tour = null;
   const preneur = courant.j;
   let mult = 1;
-  for (const adv of [(preneur + 1) % 4, (preneur + 3) % 4]) {
+  for (const adv of [apres(preneur, 1), apres(preneur, 3)]) {
     S.tour = adv; render();
     let coinche;
     if (estHumain(adv)) coinche = await humainOuiNon(`${NOMS[preneur]} a pris ${nomContrat(courant.valeur)} ${SYM[courant.couleur]}. Coincher ?`, "Coincher (×2)", "Laisser");
@@ -627,12 +629,12 @@ async function jouerDonne(donneur) {
   const beloteEquipe = beloteJoueur === undefined ? null : beloteJoueur % 2;
   let beloteJouees = 0;
   const cartes = [0, 0], plis = [0, 0];
-  let meneur = (donneur + 1) % 4;
+  let meneur = apres(donneur, 1);
 
   for (let numero = 0; numero < 8; numero++) {
     S.pli = []; S.gagnant = null;
     for (let kk = 0; kk < 4; kk++) {
-      const p = (meneur + kk) % 4;
+      const p = apres(meneur, kk);
       const jouables = cartesJouables(mains[p], S.pli, atout);
       S.tour = p; render();
       let carte;
@@ -705,7 +707,7 @@ async function jouerPartie() {
   try {
     while (Math.max(...S.scores) < S.cible) {
       const r = await jouerDonne(donneur);
-      donneur = (donneur + 1) % 4;
+      donneur = apres(donneur, 1);
       if (!r) continue;
       S.scores[0] += r.marque[0]; S.scores[1] += r.marque[1]; render();
       const fin = Math.max(...S.scores) >= S.cible;

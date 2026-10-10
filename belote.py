@@ -27,6 +27,11 @@ def nom_contrat(valeur):
     return "Capot" if valeur == CAPOT else str(valeur)
 
 
+def apres(depart, n):
+    """Joueur situé n places après `depart` : on tourne dans le sens anti-horaire."""
+    return (depart + 3 * n) % 4
+
+
 def creer_jeu():
     return [(valeur, couleur) for couleur in COULEURS for valeur in VALEURS]
 
@@ -70,7 +75,7 @@ def cartes_jouables(main, pli, atout):
             return plus_fortes or meme_couleur
         return meme_couleur
 
-    joueur = (pli[0][0] + len(pli)) % 4
+    joueur = apres(pli[0][0], len(pli))
     if gagnant_pli(pli, atout) == (joueur + 2) % 4:
         return list(main)
 
@@ -158,7 +163,7 @@ class Bot:
                 return as_[0]
             return min(jouables, key=lambda c: (points(c, atout), force(c, atout, c[1])))
         courant = gagnant_pli(pli, atout)
-        joueur = (pli[0][0] + len(pli)) % 4
+        joueur = apres(pli[0][0], len(pli))
         if courant == (joueur + 2) % 4:
             return max(jouables, key=lambda c: points(c, atout))
         meilleure = max(force(c, atout, demandee) for _, c in pli)
@@ -213,7 +218,7 @@ class BotMalin(Bot):
         connues = {c for _, c in vus} | {c for _, c in pli}
         atouts_dehors = [(v, atout) for v in ORDRE_ATOUT
                          if (v, atout) not in connues and (v, atout) not in main]
-        moi = (pli[0][0] + len(pli)) % 4 if pli else self.moi
+        moi = apres(pli[0][0], len(pli)) if pli else self.moi
         attaquant = self.preneur % 2 == moi % 2
 
         if not pli:
@@ -320,7 +325,7 @@ class Humain:
 def encheres(joueurs, mains, retournee, donneur, parler):
     for tour in (1, 2):
         for k in range(4):
-            p = (donneur + 1 + k) % 4
+            p = apres(donneur, 1 + k)
             choix = joueurs[p].prise(mains[p], retournee, tour)
             if choix is not None:
                 parler(f"{NOMS[p]} prend à {SYMBOLES[choix]} {choix}.")
@@ -335,7 +340,7 @@ def encheres_coinche(joueurs, mains, donneur, parler):
     passes = 0
     k = 0
     while True:
-        p = (donneur + 1 + k) % 4
+        p = apres(donneur, 1 + k)
         k += 1
         choix = joueurs[p].enchere(mains[p], courant, p)
         if choix is not None and (courant is None or choix[0] > courant[0]) and choix[0] in ENCHERES:
@@ -351,7 +356,7 @@ def encheres_coinche(joueurs, mains, donneur, parler):
             break
     valeur, atout, preneur = courant
     mult = 1
-    for adv in ((preneur + 1) % 4, (preneur + 3) % 4):
+    for adv in (apres(preneur, 1), apres(preneur, 3)):
         if joueurs[adv].coinche(mains[adv], courant):
             mult = 2
             parler(f"{NOMS[adv]} COINCHE !")
@@ -405,11 +410,11 @@ def jouer_donne(joueurs, donneur, parler=print, coinche=False):
     belote_jouees = 0
     cartes = [0, 0]
     plis = [0, 0]
-    meneur = (donneur + 1) % 4
+    meneur = apres(donneur, 1)
     for numero in range(8):
         pli = []
         for k in range(4):
-            p = (meneur + k) % 4
+            p = apres(meneur, k)
             jouables = cartes_jouables(mains[p], pli, atout)
             carte = joueurs[p].choisir_carte(mains[p], jouables, pli, atout, vus)
             assert carte in jouables
@@ -475,7 +480,7 @@ def jouer_partie(joueurs, cible=1000, parler=print, coinche=False):
     donneur = random.randrange(4)
     while max(scores) < cible:
         res = jouer_donne(joueurs, donneur, parler, coinche)
-        donneur = (donneur + 1) % 4
+        donneur = apres(donneur, 1)
         if res is None:
             continue
         for e in (0, 1):

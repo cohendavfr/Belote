@@ -19,6 +19,7 @@ python3 -m unittest -v             # tests
 
 ## Règles communes
 
+- Sens de jeu anti-horaire : le premier à parler et à jouer est le joueur à droite du donneur (Vous → Est → Partenaire → Ouest)
 - Jeu de 32 cartes, valeurs atout / hors atout, dix de der (+10), belote-rebelote (+20)
 - Jeu des plis : fournir, couper (sauf si le partenaire est maître), surcouper / monter à l'atout
 

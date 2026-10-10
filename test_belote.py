@@ -31,7 +31,7 @@ class TestRegles(unittest.TestCase):
 
     def test_pas_de_coupe_si_partenaire_maitre(self):
         main = [("As", "Pique"), ("8", "Trefle")]
-        pli = [(1, ("7", "Coeur")), (2, ("As", "Coeur")), (3, ("8", "Coeur"))]
+        pli = [(1, ("7", "Coeur")), (0, ("As", "Coeur")), (3, ("8", "Coeur"))]
         self.assertEqual(len(cartes_jouables(main, pli, "Pique")), 2)
 
     def test_obligation_de_surcouper(self):
@@ -48,6 +48,33 @@ class TestRegles(unittest.TestCase):
         main = [("7", "Pique"), ("Valet", "Pique"), ("8", "Trefle")]
         pli = [(0, ("9", "Pique"))]
         self.assertEqual(cartes_jouables(main, pli, "Pique"), [("Valet", "Pique")])
+
+
+class TestOrdre(unittest.TestCase):
+    def test_sens_anti_horaire(self):
+        self.assertEqual([belote.apres(0, n) for n in range(4)], [0, 3, 2, 1])
+        self.assertEqual(belote.apres(1, 1), 0)  # après Ouest vient Vous
+
+    def test_premier_a_parler_est_a_droite_du_donneur(self):
+        ordre = []
+
+        class Muet:
+            def prise(self, main, retournee, tour):
+                ordre.append(len(ordre))
+                return None
+
+        class Noteur:
+            def __init__(self, p):
+                self.p = p
+
+            def prise(self, main, retournee, tour):
+                if tour == 1:
+                    ordre.append(self.p)
+                return None
+
+        joueurs = [Noteur(p) for p in range(4)]
+        belote.encheres(joueurs, [[]] * 4, ("As", "Coeur"), 1, lambda *_: None)
+        self.assertEqual(ordre, [0, 3, 2, 1])
 
 
 class TestScore(unittest.TestCase):
@@ -113,11 +140,11 @@ class TestCoinche(unittest.TestCase):
             def surcoinche(self, main, contrat):
                 return False
 
-        # donneur 3 : Vous (0) parle en premier
-        joueurs = [Scripte([(80, "Coeur")], coinche=True), Scripte([(90, "Pique")]),
-                   Scripte([]), Scripte([])]
-        res = belote.encheres_coinche(joueurs, [[]] * 4, 3, lambda *_: None)
-        self.assertEqual(res, (1, "Pique", 90, 2))
+        # donneur 1 : Vous (0) parle en premier, puis Est (3), Partenaire (2), Ouest (1)
+        joueurs = [Scripte([(80, "Coeur")], coinche=True), Scripte([]),
+                   Scripte([]), Scripte([(90, "Pique")])]
+        res = belote.encheres_coinche(joueurs, [[]] * 4, 1, lambda *_: None)
+        self.assertEqual(res, (3, "Pique", 90, 2))
 
     def test_tout_le_monde_passe(self):
         joueurs = [Bot() for _ in range(4)]
@@ -150,7 +177,7 @@ class TestBotMalin(unittest.TestCase):
 
     def test_charge_quand_le_partenaire_est_maitre(self):
         main = [("10", "Coeur"), ("7", "Coeur")]
-        pli = [(1, ("8", "Coeur")), (2, ("As", "Coeur")), (3, ("9", "Coeur"))]
+        pli = [(3, ("8", "Coeur")), (2, ("As", "Coeur")), (1, ("9", "Coeur"))]
         carte = self.bot(moi=0).choisir_carte(main, main, pli, "Pique", [])
         self.assertEqual(carte, ("10", "Coeur"))
 
