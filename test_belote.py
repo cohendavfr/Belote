@@ -78,25 +78,18 @@ class TestOrdre(unittest.TestCase):
 
 
 class TestTriMain(unittest.TestCase):
-    def couleurs(self, main, atout=None):
-        return [c[1] for c in belote.trier_main(main, atout)]
+    def test_ordre_des_couleurs(self):
+        main = [("As", c) for c in ("Pique", "Carreau", "Trefle", "Coeur")]
+        self.assertEqual([c[1] for c in belote.trier_main(main)], ["Coeur", "Trefle", "Carreau", "Pique"])
 
-    def test_alternance_rouge_noir(self):
-        main = [("As", c) for c in belote.COULEURS]
-        rouges = ("Coeur", "Carreau")
-        ordre = self.couleurs(main)
-        self.assertEqual([c in rouges for c in ordre].count(True), 2)
-        self.assertTrue(all((a in rouges) != (b in rouges) for a, b in zip(ordre, ordre[1:])))
+    def test_valeurs_decroissantes(self):
+        main = [("7", "Pique"), ("As", "Pique"), ("10", "Pique"), ("Valet", "Pique")]
+        self.assertEqual([c[0] for c in belote.trier_main(main)], ["As", "10", "Valet", "7"])
 
-    def test_atout_a_droite(self):
-        main = [("As", c) for c in belote.COULEURS]
-        self.assertEqual(self.couleurs(main, "Pique")[-1], "Pique")
-        self.assertEqual(self.couleurs(main, "Coeur")[-1], "Coeur")
-
-    def test_force_croissante_dans_la_couleur(self):
-        main = [("As", "Pique"), ("7", "Pique"), ("10", "Pique")]
-        self.assertEqual([c[0] for c in belote.trier_main(main)], ["7", "10", "As"])
-        self.assertEqual([c[0] for c in belote.trier_main(main, "Pique")], ["7", "10", "As"])
+    def test_ordre_des_atouts_une_fois_choisi(self):
+        main = [("As", "Pique"), ("Valet", "Pique"), ("9", "Pique"), ("10", "Pique"), ("7", "Coeur"), ("As", "Coeur")]
+        self.assertEqual([c[0] for c in belote.trier_main(main, "Pique")],
+                         ["As", "7", "Valet", "9", "As", "10"])
 
 
 class TestScore(unittest.TestCase):

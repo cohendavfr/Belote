@@ -1,7 +1,6 @@
 """Belote contrat ou coinche à 4 joueurs : vous (0) et Partenaire (2) contre Ouest (1) et Est (3)."""
 import argparse
 import random
-from itertools import permutations
 
 COULEURS = ["Coeur", "Carreau", "Trefle", "Pique"]
 SYMBOLES = {"Coeur": "♥", "Carreau": "♦", "Trefle": "♣", "Pique": "♠"}
@@ -87,24 +86,14 @@ def cartes_jouables(main, pli, atout):
     return list(main)
 
 
-def ordre_couleurs(presentes, atout=None):
-    """Ordre des couleurs d'une main : alternance rouge / noir, atout à droite si possible."""
-    rouges = ("Coeur", "Carreau")
-
-    def cle(ordre):
-        alternances = sum((a in rouges) != (b in rouges) for a, b in zip(ordre, ordre[1:]))
-        return (alternances, bool(ordre) and ordre[-1] == atout)
-
-    candidats = permutations([c for c in COULEURS if c in presentes])
-    return list(max(candidats, key=cle, default=()))
+ORDRE_MAIN = ["Coeur", "Trefle", "Carreau", "Pique"]
 
 
 def trier_main(main, atout=None):
-    ordre = ordre_couleurs({c[1] for c in main}, atout)
-
+    """♥ ♣ ♦ ♠ de gauche à droite, valeurs décroissantes (ordre des atouts pour l'atout)."""
     def cle(c):
         suite = ORDRE_ATOUT if c[1] == atout else ORDRE_PLAIN
-        return (ordre.index(c[1]), suite.index(c[0]))
+        return (ORDRE_MAIN.index(c[1]), -suite.index(c[0]))
     return sorted(main, key=cle)
 
 

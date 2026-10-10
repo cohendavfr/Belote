@@ -64,19 +64,25 @@ button { font: inherit; color: inherit; }
   border-radius: 22px; padding: 14px; color: #f2f6f3;
   display: grid; gap: 10px;
   grid-template-columns: minmax(64px, 1fr) minmax(0, 3.2fr) minmax(64px, 1fr);
-  grid-template-areas: ". haut ." "gauche centre droite" "moi moi moi" "bas bas bas";
+  grid-template-areas: "contrat haut ." "gauche centre droite" "moi moi moi" "bas bas bas";
 }
 @media (max-width: 560px) {
   .table { --cw: 40px; --cwm: 52px; padding: 10px; gap: 6px; grid-template-columns: 58px minmax(0, 1fr) 58px; }
 }
 .siege { display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; min-width: 0; }
+.contrat { grid-area: contrat; align-self: start; justify-self: start; background: #0000004a; border-radius: 12px; padding: 8px 10px; display: grid; gap: 2px; font-size: 13px; line-height: 1.25; min-width: 0; max-width: 100%; }
+.contrat:empty { display: none; }
+.contrat .titre { font: 700 16px/1.1 var(--font-titre); }
+.contrat .rouge { color: #ff9d8e; }
+.contrat .note { color: #ffd98a; font-weight: 600; }
+.contrat .mini { --cw: 36px; display: block; }
 .s2 { grid-area: haut; flex-direction: row; justify-content: center; }
 .s1 { grid-area: gauche; justify-content: center; }
 .s3 { grid-area: droite; justify-content: center; }
 .s0 { grid-area: moi; flex-direction: row; justify-content: center; }
-.plaque { display: inline-flex; align-items: center; gap: 6px; background: #0000004a; border-radius: 999px; padding: 3px 10px; font-weight: 600; font-size: 13px; white-space: nowrap; }
+.plaque { display: inline-flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 6px; background: #0000004a; border-radius: 14px; padding: 3px 10px; font-weight: 600; font-size: 13px; }
 .plaque.actif { box-shadow: 0 0 0 2px var(--or); background: #0000007a; }
-.donneur { background: var(--or); color: var(--or-fg); border-radius: 50%; width: 18px; height: 18px; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+.donneur { background: var(--or); color: var(--or-fg); border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 .bulle { background: var(--carte); color: var(--encre); border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; min-height: 22px; text-align: center; }
 .bulle:empty { visibility: hidden; }
 .bulle .rouge { color: var(--rouge); }
@@ -93,8 +99,7 @@ button { font: inherit; color: inherit; }
 .carte.grise { opacity: 0.5; }
 
 .centre { grid-area: centre; display: grid; gap: 8px; justify-items: center; align-content: start; min-width: 0; }
-.info { min-height: 28px; text-align: center; font-weight: 600; }
-.info .rouge { color: #ff9d8e; }
+.info { min-height: 24px; text-align: center; font-weight: 600; color: #ffd98a; }
 .pli { display: grid; gap: 6px; grid-template-columns: repeat(3, var(--cw)); grid-template-rows: repeat(3, calc(var(--cw) * 1.4)); grid-template-areas: ". p2 ." "p1 . p3" ". p0 ."; place-items: center; }
 .pli .p0 { grid-area: p0; } .pli .p1 { grid-area: p1; } .pli .p2 { grid-area: p2; } .pli .p3 { grid-area: p3; }
 .pli .gagnant .carte { box-shadow: 0 0 0 3px var(--or), 0 1px 3px #0005; }
@@ -149,6 +154,7 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
   </header>
   <div class="jeu">
     <section class="table" id="table" aria-label="Table de jeu">
+      <div class="contrat" id="contrat" aria-live="polite"></div>
       <div class="siege s2" id="siege-2"></div>
       <div class="siege s1" id="siege-1"></div>
       <div class="siege s3" id="siege-3"></div>
@@ -239,25 +245,11 @@ function cartesJouables(main, pli, atout) {
   return main.slice();
 }
 
-const estRouge = (couleur) => couleur === "Coeur" || couleur === "Carreau";
-
-/* Ordre des couleurs de la main : on alterne rouge / noir, atout à droite si possible. */
-function ordreCouleurs(presentes, atout) {
-  const perms = (a) => (a.length <= 1 ? [a] : a.flatMap((x, i) => perms([...a.slice(0, i), ...a.slice(i + 1)]).map((p) => [x, ...p])));
-  let best = null, bestKey = null;
-  for (const p of perms(COULEURS.filter((c) => presentes.has(c)))) {
-    let alternances = 0;
-    for (let i = 0; i + 1 < p.length; i++) if (estRouge(p[i]) !== estRouge(p[i + 1])) alternances++;
-    const key = [alternances, p[p.length - 1] === atout ? 1 : 0];
-    if (best === null || cmpCle(key, bestKey) > 0) { best = p; bestKey = key; }
-  }
-  return best || [];
-}
-
+/* Main : ♥ ♣ ♦ ♠ de gauche à droite, valeurs décroissantes ; l'atout, une fois choisi, suit l'ordre des atouts. */
+const ORDRE_MAIN = ["Coeur", "Trefle", "Carreau", "Pique"];
 function trierMain(main, atout) {
-  const ordre = ordreCouleurs(new Set(main.map((c) => c.c)), atout);
-  const cle = (c) => [ordre.indexOf(c.c), (c.c === atout ? ORD_ATOUT : ORD_PLAIN).indexOf(c.v)];
-  return main.slice().sort((a, b) => cmpCle(cle(a), cle(b)));
+  const rang = (c) => (c.c === atout ? ORD_ATOUT : ORD_PLAIN).indexOf(c.v);
+  return main.slice().sort((a, b) => cmpCle([ORDRE_MAIN.indexOf(a.c), -rang(a)], [ORDRE_MAIN.indexOf(b.c), -rang(b)]));
 }
 
 /* ---- Bots ---- */
@@ -423,26 +415,28 @@ function render() {
   if (S.auto) return;
   $("#scores").innerHTML = `<span>Nous</span> <b>${S.scores[0]}</b> <span>Eux</span> <b>${S.scores[1]}</b> <span>objectif ${S.cible}</span>`;
   for (let p = 0; p < 4; p++) {
-    const plaque = `<span class="plaque ${S.tour === p ? "actif" : ""}">${NOMS[p]}${S.donneur === p ? '<span class="donneur" title="Donneur">D</span>' : ""}</span>`;
+    const plaque = `<span class="plaque ${S.tour === p ? "actif" : ""}">${NOMS[p]}${S.donneur === p ? '<span class="donneur">Donneur</span>' : ""}</span>`;
     const bulle = `<div class="bulle">${S.bulles[p] || ""}</div>`;
     let corps;
     if (p === 0) corps = plaque + bulle;
     else corps = `${plaque}<span class="carte dos"><span class="nb">${S.mains[p].length}</span></span>${bulle}`;
     $("#siege-" + p).innerHTML = corps;
   }
-  // centre
-  let info = "";
+  // contrat (en haut à gauche de la table)
+  let lignes = [];
   if (S.mode === "coinche" && S.enchereCourante && S.atout === null) {
-    info = `Enchère : ${nomContrat(S.enchereCourante.valeur)} ${symHtml(S.enchereCourante.couleur)} (${NOMS[S.enchereCourante.j]})`;
+    const e = S.enchereCourante;
+    lignes = [`<div class="titre">Enchère</div>`, `<div>${nomContrat(e.valeur)} ${symHtml(e.couleur)}</div>`, `<div>par ${NOMS[e.j]}</div>`];
   } else if (S.atout) {
-    const ctr = S.contrat ? `${nomContrat(S.contrat)} ` : "";
-    const mult = S.mult === 2 ? " · coinché ×2" : S.mult === 4 ? " · surcoinché ×4" : "";
-    info = `Atout ${symHtml(S.atout)} · ${ctr}${NOMS[S.preneur]}${mult}`;
+    lignes = [`<div class="titre">Atout ${symHtml(S.atout)}</div>`];
+    if (S.contrat) lignes.push(`<div>Contrat ${nomContrat(S.contrat)}</div>`);
+    lignes.push(`<div>Preneur : ${NOMS[S.preneur]}</div>`);
+    if (S.mult > 1) lignes.push(`<div class="note">${S.mult === 2 ? "Coinché ×2" : "Surcoinché ×4"}</div>`);
   } else if (S.retournee) {
-    info = `Carte retournée : ${carteHtml(S.retournee, "").replace('class="carte', 'style="display:inline-block;width:30px;vertical-align:middle" class="carte')}`;
+    lignes = [`<div class="titre">Retournée</div>`, `<div>${carteHtml(S.retournee, "mini")}</div>`];
   }
-  if (S.toast) info = S.toast;
-  $("#info").innerHTML = info;
+  $("#contrat").innerHTML = lignes.join("");
+  $("#info").textContent = S.toast || "";
   let pli = "";
   for (const x of S.pli) pli += `<div class="p${x.j} ${S.gagnant === x.j ? "gagnant" : ""}">${carteHtml(x.carte)}</div>`;
   if (!S.pli.length && S.retournee && S.atout === null) pli = `<div class="p0" style="grid-area:2/2">${carteHtml(S.retournee)}</div>`;
