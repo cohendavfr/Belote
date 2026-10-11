@@ -152,14 +152,23 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 .place.moi { border-color: var(--or); box-shadow: inset 0 0 0 1px var(--or); font-weight: 600; }
 .place.libre { color: var(--muted); font-weight: 400; }
 .btn[aria-pressed="true"] { background: var(--or); color: var(--or-fg); border-color: var(--or); }
-.tuiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.tuile { position: relative; aspect-ratio: 4 / 3; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; display: grid; place-items: center; }
+.siege-visio { display: contents; }
+.siege-corps { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+.s2 .siege-corps, .s0 .siege-corps { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+.s0 { flex-wrap: wrap; }
+.tuile { --tw: 92px; position: relative; flex: none; width: var(--tw); aspect-ratio: 4 / 3; border-radius: 12px; background: #0000005c; border: 2px solid #ffffff3d; overflow: hidden; display: grid; place-items: center; color: #fff; transition: box-shadow 0.1s; }
+.tuile.parle { border-color: var(--or); box-shadow: 0 0 0 3px var(--or); }
+.tuile .boutons { position: absolute; right: 4px; top: 4px; display: flex; gap: 4px; z-index: 2; }
+.tuile .bouton-media { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 1px solid #ffffff66; background: #000a; color: #fff; display: grid; place-items: center; cursor: pointer; }
+.tuile .bouton-media[aria-pressed="true"] { background: var(--ok); border-color: var(--ok); color: #fff; }
+.tuile .bouton-media:focus-visible { outline: 3px solid var(--or); outline-offset: 1px; }
+.tuile .bouton-media svg { width: 15px; height: 15px; fill: currentColor; }
+@media (max-width: 560px) { .tuile { --tw: 56px; } .s2 .tuile, .s0 .tuile { --tw: 74px; } .tuile .bouton-media { width: 22px; height: 22px; } .tuile .bouton-media svg { width: 12px; height: 12px; } }
 .tuile video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .tuile video.miroir { transform: scaleX(-1); }
-.tuile .visage { width: 52%; color: var(--muted); opacity: 0.6; }
-.tuile .etiquette { position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #000b; color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 12px; }
-.tuile .son { position: absolute; top: 7px; right: 7px; width: 10px; height: 10px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px #0007; }
-.tuile.sans-son .son { background: var(--muted); opacity: 0.6; }
+.tuile .visage { width: 50%; color: #fff; opacity: 0.4; }
+.tuile .etiquette { position: absolute; left: 4px; bottom: 4px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #000b; color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 12px; }
+.tuile .son { position: absolute; left: 6px; top: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px #0007; }
 .actions-media { display: flex; flex-wrap: wrap; gap: 8px; }
 .verdict { font-weight: 700; }
 .verdict.ok { color: var(--ok); } .verdict.ko { color: var(--ko); }
@@ -178,25 +187,22 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
   <div class="jeu">
     <section class="table" id="table" aria-label="Table de jeu">
       <div class="contrat" id="contrat" aria-live="polite"></div>
-      <div class="siege s2" id="siege-2"></div>
-      <div class="siege s1" id="siege-1"></div>
-      <div class="siege s3" id="siege-3"></div>
+      <div class="siege s2" id="siege-2"><div class="siege-visio"></div><div class="siege-corps"></div></div>
+      <div class="siege s1" id="siege-1"><div class="siege-visio"></div><div class="siege-corps"></div></div>
+      <div class="siege s3" id="siege-3"><div class="siege-visio"></div><div class="siege-corps"></div></div>
       <div class="centre">
         <div class="info" id="info"></div>
         <div class="pli" id="pli"></div>
         <div class="action" id="action" aria-live="polite"></div>
       </div>
-      <div class="siege s0" id="siege-0"></div>
+      <div class="siege s0" id="siege-0"><div class="siege-visio"></div><div class="siege-corps"></div></div>
       <div class="main" id="main" aria-label="Votre main"></div>
     </section>
     <aside class="cote">
       <section class="panneau" id="visio" hidden>
-        <h2>Joueurs en ligne</h2>
-        <div class="tuiles" id="visio-tuiles"></div>
-        <div class="actions-media">
-          <button class="btn" type="button" data-media="audio" aria-pressed="false">Micro</button>
-          <button class="btn" type="button" data-media="video" aria-pressed="false">Caméra</button>
-        </div>
+        <h2>Voix et vidéo</h2>
+        <p class="message">Votre vignette est à côté de votre nom, sur la table : le micro et la caméra s'y activent.</p>
+        <button class="btn or" type="button" id="btn-son" hidden>Activer le son des autres joueurs</button>
         <p class="message" id="msg-media" aria-live="polite"></p>
       </section>
       <section class="panneau">
@@ -644,7 +650,7 @@ function render() {
     const bulle = `<div class="bulle">${S.bulles[q] || ""}</div>`;
     const corps = q === S.moi ? plaque + bulle
       : `${plaque}<span class="carte dos"><span class="nb">${S.mains[q].length}</span></span>${bulle}`;
-    $("#siege-" + rel(q)).innerHTML = corps;
+    $("#siege-" + rel(q) + " .siege-corps").innerHTML = corps;
   }
   // contrat (en haut à gauche de la table)
   let lignes = [];
@@ -669,6 +675,7 @@ function render() {
   const main = trierMain(S.mains[S.moi], S.atout);
   const att = S.attenteCarte;
   if (R.role === "hote") diffuserEtat();
+  majVisio();
   $("#main").innerHTML = main.map((c) => {
     const rouge = c.c === "Coeur" || c.c === "Carreau";
     const jouable = att && has(att.jouables, c);
@@ -1462,6 +1469,7 @@ const M = {
   appels: new Map(),                    // "kind:peerId" -> appel sortant
   recus: new Map(),                     // "kind:peerId" -> { appel, flux }
   lecteurs: new Map(),                  // peerId -> <audio>
+  analyses: new WeakMap(), ctx: null,
   signature: "",
 };
 const peersActuels = () => (R.role === "hote" ? R.places.map((p) => (p && p.peerId) || null) : R.peersVus || [null, null, null, null]);
@@ -1522,6 +1530,7 @@ function messageMedia(txt) {
   if (el) el.textContent = txt || "";
 }
 async function basculerMedia(kind) {
+  contexteAudio();
   if (M.flux[kind]) { arreterFlux(kind); synchroniserMedia(); majBoutonsMedia(); return; }
   const md = typeof navigator !== "undefined" && navigator.mediaDevices;
   if (!md || !md.getUserMedia) { messageMedia("Ce navigateur ne permet pas d'utiliser le micro ou la caméra ici."); return; }
@@ -1556,63 +1565,144 @@ function majBoutonsMedia() {
 }
 
 const TETE_SVG = '<svg class="visage" viewBox="0 0 64 64" role="img" aria-label="Caméra éteinte" fill="currentColor"><circle cx="32" cy="22" r="12"/><path d="M8 60c0-13 10-22 24-22s24 9 24 22z"/></svg>';
+const MICRO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V22h2v-3.1A7 7 0 0 0 19 12z"/></svg>';
+const CAMERA_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10a2 2 0 0 1 2 2v1.5l4-2.5v10l-4-2.5V16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/></svg>';
+
+/* Places occupées par des humains, vues de ce navigateur. */
+function siegesHumains() {
+  if (R.role === "solo") return [];
+  const hum = [];
+  for (let q = 0; q < 4; q++) {
+    let h;
+    if (R.phase === "salle") h = R.role === "hote" ? !!R.places[q] : !!R.placesVues[q];
+    else h = q === S.moi || (R.role === "hote" ? S.sieges[q] === "distant" : !!S.noms[q]);
+    if (h) hum.push(q);
+  }
+  return hum;
+}
 function nomVisio(q) {
   if (q === S.moi) return "Vous";
   if (R.role === "hote") return (R.places[q] && R.places[q].nom) || "Joueur";
   return S.noms[q] || (R.placesVues[q] && R.placesVues[q].nom) || "Joueur";
 }
-/* Met à jour la fenêtre des joueurs connectés : vidéo si le joueur filme, sinon une tête grisée. */
+
+/* Niveau sonore d'un flux : sert à entourer la vignette de celui qui parle. */
+function contexteAudio() {
+  if (!M.ctx) { try { M.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { M.ctx = null; } }
+  if (M.ctx && M.ctx.state === "suspended") M.ctx.resume().catch(() => {});
+  return M.ctx;
+}
+function niveauDe(flux) {
+  if (!flux || !flux.getAudioTracks || !flux.getAudioTracks().length) return 0;
+  let a = M.analyses.get(flux);
+  if (a === undefined) {
+    a = null;
+    const ctx = contexteAudio();
+    if (ctx) {
+      try {
+        const src = ctx.createMediaStreamSource(flux), an = ctx.createAnalyser();
+        an.fftSize = 256; src.connect(an);
+        a = { an, buf: new Uint8Array(an.fftSize) };
+      } catch (e) { a = null; }
+    }
+    M.analyses.set(flux, a);
+  }
+  if (!a) return 0;
+  a.an.getByteTimeDomainData(a.buf);
+  let s = 0;
+  for (const v of a.buf) { const x = (v - 128) / 128; s += x * x; }
+  return Math.sqrt(s / a.buf.length);
+}
+function majParole() {
+  document.querySelectorAll(".tuile").forEach((t) => {
+    const q = Number(t.dataset.q);
+    const flux = q === S.moi ? M.flux.audio : (M.recus.get("audio:" + (peersActuels()[q] || "")) || {}).flux;
+    t.classList.toggle("parle", niveauDe(flux) > 0.035);
+  });
+}
+
+function lireSons() {
+  let bloque = false;
+  for (const l of M.lecteurs.values()) {
+    const p = l.play();
+    if (p && p.catch) p.catch(() => { bloque = true; const b = document.querySelector("#btn-son"); if (b) b.hidden = false; });
+  }
+  if (!bloque) { const b = document.querySelector("#btn-son"); if (b) b.hidden = true; }
+}
+
+/* Met à jour les vignettes, une par joueur humain, à côté de son nom sur la table. */
 function majVisio() {
   const panneau = document.querySelector("#visio");
-  const zone = document.querySelector("#visio-tuiles");
-  if (!panneau || !zone) return;
+  if (panneau) panneau.hidden = R.role === "solo";
+  const humains = siegesHumains();
+  // vignettes obsolètes
+  document.querySelectorAll(".tuile").forEach((t) => { if (!humains.includes(Number(t.dataset.q))) t.remove(); });
   const peers = peersActuels();
-  const humains = R.role === "solo" ? [] : peers.map((id, q) => (id ? { id, q } : null)).filter(Boolean);
-  panneau.hidden = humains.length < 2;
-  const moi = monPeerId();
-  const ids = new Set(humains.map((h) => h.id));
-  zone.querySelectorAll(".tuile").forEach((t) => { if (!ids.has(t.dataset.id)) t.remove(); });
-  for (const { id, q } of humains) {
-    let t = zone.querySelector(`.tuile[data-id="${id}"]`);
+  const lecteursVus = new Set();
+  for (const q of humains) {
+    const id = peers[q] || null;
+    const soi = q === S.moi;
+    const conteneur = document.querySelector(`#siege-${rel(q)} .siege-visio`);
+    if (!conteneur) continue;
+    let t = document.querySelector(`.tuile[data-q="${q}"]`);
     if (!t) {
       t = document.createElement("div");
-      t.className = "tuile"; t.dataset.id = id;
-      t.innerHTML = `${TETE_SVG}<video playsinline autoplay muted hidden></video><span class="son" hidden></span><span class="etiquette"></span>`;
-      zone.appendChild(t);
+      t.className = "tuile"; t.dataset.q = String(q);
+      t.innerHTML = `${TETE_SVG}<video playsinline autoplay muted hidden></video><span class="son" hidden></span><span class="etiquette"></span>` +
+        (soi ? `<span class="boutons"><button type="button" class="bouton-media" data-media="audio" aria-pressed="false" aria-label="Micro">${MICRO_SVG}</button><button type="button" class="bouton-media" data-media="video" aria-pressed="false" aria-label="Caméra">${CAMERA_SVG}</button></span>` : "");
     }
-    const soi = id === moi;
-    const flux = soi ? M.flux.video : (M.recus.get("video:" + id) || {}).flux;
+    if (t.parentNode !== conteneur) conteneur.appendChild(t);
+    t.dataset.q = String(q);
+    const flux = soi ? M.flux.video : id && (M.recus.get("video:" + id) || {}).flux;
     const video = t.querySelector("video");
-    if (video.srcObject !== (flux || null)) video.srcObject = flux || null;
+    if (video.srcObject !== (flux || null)) {
+      video.srcObject = flux || null;
+      if (flux) { const p = video.play(); if (p && p.catch) p.catch(() => {}); }
+    }
     video.classList.toggle("miroir", soi);
     video.hidden = !flux;
     t.querySelector(".visage").style.display = flux ? "none" : "";
-    const audioActif = soi ? !!M.flux.audio : M.recus.has("audio:" + id);
-    const son = t.querySelector(".son");
-    son.hidden = !audioActif;
-    son.setAttribute("title", "Micro activé");
+    const audioActif = soi ? !!M.flux.audio : !!(id && M.recus.has("audio:" + id));
+    t.querySelector(".son").hidden = !audioActif;
     t.querySelector(".etiquette").textContent = nomVisio(q);
-    // lecteur audio caché pour les autres joueurs
-    if (!soi) {
+    // lecteur audio (autres joueurs) : rattaché au document, pas masqué par display:none
+    if (!soi && id) {
       const r = M.recus.get("audio:" + id);
-      let lecteur = M.lecteurs.get(id);
-      if (r && !lecteur) {
-        lecteur = document.createElement("audio");
-        lecteur.autoplay = true; lecteur.hidden = true;
-        zone.appendChild(lecteur); M.lecteurs.set(id, lecteur);
+      let l = M.lecteurs.get(id);
+      if (r && !l) {
+        l = document.createElement("audio");
+        l.autoplay = true; l.setAttribute("playsinline", "");
+        l.style.cssText = "position:absolute;width:0;height:0;opacity:0;pointer-events:none";
+        document.body.appendChild(l); M.lecteurs.set(id, l);
       }
-      if (lecteur && lecteur.srcObject !== (r ? r.flux : null)) lecteur.srcObject = r ? r.flux : null;
-      if (!r && lecteur) { lecteur.srcObject = null; lecteur.remove(); M.lecteurs.delete(id); }
+      if (l && r && l.srcObject !== r.flux) { l.srcObject = r.flux; const p = l.play(); if (p && p.catch) p.catch(() => { const b = document.querySelector("#btn-son"); if (b) b.hidden = false; }); }
+      if (l) lecteursVus.add(id);
     }
   }
-  for (const [id, l] of [...M.lecteurs]) if (!ids.has(id)) { l.srcObject = null; l.remove(); M.lecteurs.delete(id); }
+  for (const [id, l] of [...M.lecteurs]) {
+    const r = M.recus.get("audio:" + id);
+    if (!r || !lecteursVus.has(id)) { l.srcObject = null; l.remove(); M.lecteurs.delete(id); }
+  }
   majBoutonsMedia();
+}
+
+function majBoutonsMedia() {
+  document.querySelectorAll("[data-media]").forEach((b) => {
+    const actif = !!M.flux[b.dataset.media];
+    b.setAttribute("aria-pressed", String(actif));
+    const nomBtn = b.dataset.media === "audio" ? "Micro" : "Caméra";
+    if (b.classList.contains("bouton-media")) b.setAttribute("aria-label", nomBtn + (actif ? " activé : cliquer pour couper" : " éteint : cliquer pour activer"));
+    else b.textContent = nomBtn + (actif ? " activé" : "");
+  });
 }
 
 document.addEventListener("click", (e) => {
   const b = e.target.closest && e.target.closest("[data-media]");
   if (b) basculerMedia(b.dataset.media);
+  else if (e.target.closest && e.target.closest("#btn-son")) { contexteAudio(); lireSons(); }
+  else if (M.lecteurs.size) lireSons();   // un geste de l'utilisateur débloque la lecture sur mobile
 });
+setInterval(majParole, 150);
 
 /* ---- Client ---- */
 async function rejoindre(code, pseudo) {
