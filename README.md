@@ -10,7 +10,8 @@ Ouvrir `index.html` dans un navigateur (aucune dépendance, tout est dans le fic
 
 Dans le menu, « Créer une salle » donne un code de 5 caractères ; les autres joueurs le saisissent dans « Rejoindre ». Les places libres sont tenues par des bots du niveau choisi par l'hôte, et chacun peut changer de place avant le lancement (les deux places d'une équipe sont face à face).
 
-- Les messages de jeu passent par un courtier MQTT public (WebSocket sécurisé) : cela fonctionne depuis un téléphone en 4G/5G ou derrière un pare-feu, sans configuration. L'hôte fait tourner la partie ; chaque joueur ne reçoit que sa propre main, sur un canal à son nom. Le code de la salle sert de secret : ne le diffusez pas publiquement
+- Deux voies indépendantes, la salle s'ouvre dès que l'une répond : une connexion directe entre navigateurs (WebRTC, via PeerJS) et un serveur de messages public (MQTT sur WebSocket sécurisé, trois serveurs interrogés en parallèle). Chaque joueur utilise celle qui marche pour lui, ce qui fonctionne depuis un téléphone en 4G/5G ou derrière un pare-feu. Les serveurs publics sont parfois lents : la création d'une salle peut prendre quelques secondes
+- L'hôte fait tourner la partie ; chaque joueur ne reçoit que sa propre main. Le code de la salle sert de secret : ne le diffusez pas publiquement
 - Si un joueur quitte en cours de partie, un bot prend sa place
 - L'hôte est aussi un joueur : il connaît techniquement toutes les mains, c'est un jeu entre amis
 - Les annonces vocales sont jouées sur chaque navigateur, dans la langue choisie par chacun
