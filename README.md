@@ -10,12 +10,11 @@ Ouvrir `index.html` dans un navigateur (aucune dépendance, tout est dans le fic
 
 Dans le menu, « Créer une salle » donne un code de 5 caractères ; les autres joueurs le saisissent dans « Rejoindre ». Les places libres sont tenues par des bots du niveau choisi par l'hôte, et chacun peut changer de place avant le lancement (les deux places d'une équipe sont face à face).
 
-- Connexion pair à pair (WebRTC) via PeerJS : aucun serveur de jeu. L'hôte fait tourner la partie ; chaque joueur ne reçoit que sa propre main
+- Les messages de jeu passent par un courtier MQTT public (WebSocket sécurisé) : cela fonctionne depuis un téléphone en 4G/5G ou derrière un pare-feu, sans configuration. L'hôte fait tourner la partie ; chaque joueur ne reçoit que sa propre main, sur un canal à son nom. Le code de la salle sert de secret : ne le diffusez pas publiquement
 - Si un joueur quitte en cours de partie, un bot prend sa place
 - L'hôte est aussi un joueur : il connaît techniquement toutes les mains, c'est un jeu entre amis
 - Les annonces vocales sont jouées sur chaque navigateur, dans la langue choisie par chacun
-- Voix et vidéo : chaque joueur peut activer son micro et/ou sa caméra (boutons dans la salle et dans la fenêtre « Joueurs en ligne »). Les flux passent directement d'un navigateur à l'autre. Un joueur sans caméra apparaît avec une tête grisée ; le micro et la caméra restent éteints tant que vous ne les activez pas
-- Selon le réseau (pare-feu d'entreprise, par exemple) la connexion directe peut échouer
+- Voix et vidéo : chaque joueur peut activer son micro et/ou sa caméra (boutons dans la salle et dans la fenêtre « Joueurs en ligne »). Les flux passent directement d'un navigateur à l'autre (WebRTC) et peuvent ne pas aboutir sur certains réseaux mobiles ou d'entreprise ; le jeu, lui, n'en dépend pas. Un joueur sans caméra apparaît avec une tête grisée ; le micro et la caméra restent éteints tant que vous ne les activez pas
 
 ## Lancer en terminal
 

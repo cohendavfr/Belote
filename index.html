@@ -218,6 +218,7 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 
 <div class="voile" id="voile" hidden><div class="fiche" id="fiche"></div></div>
 
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 "use strict";
@@ -1175,21 +1176,27 @@ async function jouerPartie() {
 /* ===================== Jeu en ligne (pair à pair, 2 à 4 joueurs) ===================== */
 /* L'hôte fait tourner la partie ; les autres navigateurs reçoivent leur vue (leur main seulement)
    et renvoient leurs choix. Les places non occupées sont tenues par des bots. */
-const ICE = { iceServers: [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443"], username: "openrelayproject", credential: "openrelayproject" },
-] };
+/* Les données de jeu passent par un courtier de messages public (MQTT sur WebSocket) : il suffit que
+   chaque navigateur puisse sortir vers Internet, même en 4G ou derrière un pare-feu. La voix et la
+   vidéo, elles, utilisent une connexion directe (WebRTC) et peuvent ne pas aboutir sur certains réseaux. */
+const BROKERS = ["wss://broker.emqx.io:8084/mqtt", "wss://broker.hivemq.com:8884/mqtt", "wss://test.mosquitto.org:8081/mqtt"];
+const PREFIXE = "belote-v1/";
+const ICE_MEDIA = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
 const R = {
   role: "solo",          // "solo" | "hote" | "client"
   phase: null,           // "salle" | "jeu"
-  usine: (id) => (id ? new Peer(id, { config: ICE }) : new Peer({ config: ICE })),
-  peer: null, code: null,
-  places: [null, null, null, null],   // hôte : { nom, lien } par siège ; lien null = l'hôte lui-même
+  connecter: (url, opts) => mqtt.connect(url, opts),   // remplaçable (tests)
+  usinePeer: () => new Peer({ config: ICE_MEDIA }),    // connexion directe pour la voix et la vidéo
+  T: { ping: 5000, perteClient: 20000, perteHote: 25000, presence: 600000, connexion: 6000 },
+  mqtt: null, rubrique: null, monId: null, code: null, essai: 0, minuteries: [], dernierVu: 0,
+  clients: new Map(),    // hôte : id du client -> { lien, vu }
+  peerMedia: null,
+  places: [null, null, null, null],   // hôte : { nom, lien, peerId } par siège ; lien null = l'hôte lui-même
   placesVues: [null, null, null, null], // client : { nom } par siège
-  lienHote: null,                     // client : connexion vers l'hôte
+  lienHote: null,                     // client : lien vers l'hôte
   attentes: new Map(), fiches: new Map(), idDemande: 0, idFiche: 0,
   nomsAbs: [null, null, null, null], message: null,
-  peersVus: [null, null, null, null],   // client : identifiants réseau des joueurs, par siège
+  peersVus: [null, null, null, null],   // client : identifiants WebRTC des joueurs, par siège
 };
 const ORDRE_PLACES = [0, 2, 1, 3]; // le 2e joueur devient le partenaire de l'hôte
 
@@ -1244,7 +1251,7 @@ function afficherSalle() {
       <button class="btn" type="button" data-media="audio" aria-pressed="false">Micro</button>
       <button class="btn" type="button" data-media="video" aria-pressed="false">Caméra</button>
     </div>
-    <p class="message">Micro et caméra sont facultatifs. Tout passe directement entre les navigateurs des joueurs.</p>
+    <p class="message">Micro et caméra sont facultatifs et passent directement entre les navigateurs des joueurs.</p>
     <button class="btn" id="quitter" type="button">Quitter la salle</button>`);
   document.querySelectorAll("#fiche button[data-q]").forEach((b) => b.addEventListener("click", () => demanderPlace(Number(b.dataset.q))));
   const lancer = $("#lancer");
@@ -1264,30 +1271,123 @@ function deplacer(de, q) {
   diffuserSalle(); afficherSalle();
 }
 
-function ouvrirSalle(pseudo) {
-  if (typeof Peer === "undefined") return messageReseau("Le jeu en ligne n'est pas disponible : la bibliothèque réseau n'a pas pu être chargée.", true);
+/* Lien : l'équivalent d'une connexion, au-dessus des messages du courtier. */
+class Lien {
+  constructor(envoi, fermer) { this.h = {}; this.open = true; this._envoi = envoi; this._fermer = fermer; }
+  on(e, f) { (this.h[e] = this.h[e] || []).push(f); return this; }
+  emit(e, ...a) { (this.h[e] || []).slice().forEach((f) => f(...a)); }
+  send(m) { if (this.open) this._envoi(m); }
+  close() {
+    if (!this.open) return;
+    this.open = false;
+    try { if (this._fermer) this._fermer(); } catch (e) { /* déjà fermé */ }
+    this.emit("close");
+  }
+}
+const idAleatoire = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+const analyser = (payload) => { try { return JSON.parse(payload.toString()); } catch (e) { return null; } };
+
+function connecterMqtt(url, opts) {
+  return new Promise((res, rej) => {
+    let client = null, fini = false;
+    const t = setTimeout(() => { if (!fini) { fini = true; try { client.end(true); } catch (e) { /* rien */ } rej(new Error("délai")); } }, R.T.connexion);
+    try { client = R.connecter(url, Object.assign({ reconnectPeriod: 2000, connectTimeout: R.T.connexion, keepalive: 30, clean: true }, opts)); }
+    catch (e) { clearTimeout(t); return rej(e); }
+    client.on("error", () => { /* géré par le délai ou la reconnexion */ });
+    client.once("connect", () => { if (!fini) { fini = true; clearTimeout(t); res(client); } });
+  });
+}
+/* Vrai si aucune salle n'existe déjà sous ce code. */
+function codeLibre(client, rubrique) {
+  return new Promise((res) => {
+    let pris = false;
+    const ecoute = (topic, payload) => { if (topic === rubrique + "presence" && analyser(payload)) pris = true; };
+    client.on("message", ecoute);
+    client.subscribe(rubrique + "presence");
+    setTimeout(() => {
+      client.removeListener("message", ecoute);
+      try { client.unsubscribe(rubrique + "presence"); } catch (e) { /* rien */ }
+      res(!pris);
+    }, 700);
+  });
+}
+
+async function ouvrirSalle(pseudo) {
+  if (typeof mqtt === "undefined") return messageReseau("Le jeu en ligne n'est pas disponible : la bibliothèque réseau n'a pas pu être chargée.", true);
   quitterReseau();
+  const jeton = ++R.essai;
+  messageReseau("Création de la salle…");
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const tirer = () => Array.from({ length: 5 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
-  messageReseau("Création de la salle…");
-  const essayer = (n) => {
-    const code = tirer();
-    let peer;
-    try { peer = R.usine("belote-" + code); } catch (e) { return messageReseau("Connexion réseau impossible.", true); }
-    peer.on("open", () => {
-      R.role = "hote"; R.phase = "salle"; R.peer = peer; R.code = code;
-      R.places = [{ nom: propre(pseudo), lien: null, peerId: peer.id }, null, null, null];
-      S.moi = 0; afficherSalle();
-    });
-    peer.on("connection", (conn) => accepter(conn));
+  const id = idAleatoire();
+  for (const url of BROKERS) {
+    for (let n = 0; n < 4; n++) {
+      const code = tirer(), rubrique = PREFIXE + code + "/";
+      let client;
+      try {
+        client = await connecterMqtt(url, { clientId: "belote-h-" + id, will: { topic: rubrique + "presence", payload: "", retain: true, qos: 0 } });
+      } catch (e) { break; } // courtier injoignable : on essaie le suivant
+      if (jeton !== R.essai) { try { client.end(true); } catch (e) { /* rien */ } return; }
+      if (!(await codeLibre(client, rubrique))) { try { client.end(true); } catch (e) { /* rien */ } continue; }
+      if (jeton !== R.essai) { try { client.end(true); } catch (e) { /* rien */ } return; }
+      return demarrerHote(client, code, id, pseudo);
+    }
+  }
+  if (jeton === R.essai) messageReseau("Impossible de joindre le service de salles. Vérifiez votre connexion.", true);
+}
+
+function demarrerHote(client, code, id, pseudo) {
+  const rubrique = PREFIXE + code + "/";
+  R.role = "hote"; R.phase = "salle"; R.mqtt = client; R.code = code; R.rubrique = rubrique; R.monId = id;
+  R.places = [{ nom: propre(pseudo), lien: null, peerId: null }, null, null, null];
+  R.clients = new Map();
+  S.moi = 0;
+  const presence = () => { try { client.publish(rubrique + "presence", JSON.stringify({ t: "salle", ts: Date.now() }), { retain: true }); } catch (e) { /* hors ligne */ } };
+  client.subscribe(rubrique + "hote");
+  presence();
+  client.on("message", (topic, payload) => {
+    if (topic !== rubrique + "hote") return;
+    const m = analyser(payload);
+    if (!m || typeof m.de !== "string" || m.de.length > 40) return;
+    let c = R.clients.get(m.de);
+    if (m.t === "bye") { if (c) c.lien.close(); return; }
+    if (!c) {
+      if (m.t !== "hello") return;
+      const lien = new Lien((msg) => client.publish(rubrique + "c/" + m.de, JSON.stringify(msg)), () => R.clients.delete(m.de));
+      c = { lien, vu: Date.now() };
+      R.clients.set(m.de, c);
+      accepter(lien);
+    }
+    c.vu = Date.now();
+    if (m.t !== "ping") c.lien.emit("data", m);
+  });
+  R.minuteries.push(setInterval(() => {
+    try { client.publish(rubrique + "tous", JSON.stringify({ t: "ping" })); } catch (e) { /* hors ligne */ }
+    presence();
+    for (const c of [...R.clients.values()]) if (Date.now() - c.vu > R.T.perteClient) c.lien.close();
+  }, R.T.ping));
+  creerPeerMedia();
+  afficherSalle();
+}
+
+/* Voix et vidéo : identifiant WebRTC de ce navigateur, annoncé aux autres joueurs. */
+function creerPeerMedia() {
+  if (typeof Peer === "undefined") return;
+  try {
+    const peer = R.usinePeer();
+    R.peerMedia = peer;
     accepterAppelsMedia(peer);
-    peer.on("error", (e) => {
-      if (e.type === "unavailable-id" && n < 5) return essayer(n + 1);
-      if (R.role === "hote") return;
-      messageReseau("Impossible de créer la salle (" + (e.type || "erreur réseau") + ").", true);
-    });
-  };
-  essayer(0);
+    peer.on("open", (id) => declarerPeerId(id));
+    peer.on("error", () => { /* voix et vidéo indisponibles, le jeu continue */ });
+  } catch (e) { /* voix et vidéo indisponibles */ }
+}
+function declarerPeerId(id) {
+  if (R.role === "hote") {
+    if (R.places[S.moi]) R.places[S.moi].peerId = id;
+    diffuserSalle(); synchroniserMedia();
+  } else if (R.role === "client" && R.lienHote) {
+    R.lienHote.send({ t: "peer", peerId: id });
+  }
 }
 
 function accepter(conn) {
@@ -1305,7 +1405,10 @@ function accepter(conn) {
     const q = conn._siege;
     if (q === undefined || !R.places[q] || R.places[q].lien !== conn) return;
     if (msg.t === "siege" && Number.isInteger(msg.q) && msg.q >= 0 && msg.q < 4) deplacer(q, msg.q);
-    else if (msg.t === "reponse") {
+    else if (msg.t === "peer" && typeof msg.peerId === "string") {
+      R.places[q].peerId = msg.peerId.slice(0, 64);
+      diffuserSalle(); synchroniserMedia();
+    } else if (msg.t === "reponse") {
       const a = R.attentes.get(msg.id);
       if (a && a.p === q) { R.attentes.delete(msg.id); a.res(valider(a.kind, a.d, msg.valeur)); }
     } else if (msg.t === "pret") {
@@ -1314,7 +1417,6 @@ function accepter(conn) {
     }
   });
   conn.on("close", () => joueurParti(conn));
-  conn.on("error", () => joueurParti(conn));
 }
 
 function joueurParti(conn) {
@@ -1363,7 +1465,7 @@ const M = {
   signature: "",
 };
 const peersActuels = () => (R.role === "hote" ? R.places.map((p) => (p && p.peerId) || null) : R.peersVus || [null, null, null, null]);
-const monPeerId = () => (R.peer && R.peer.id) || null;
+const monPeerId = () => (R.peerMedia && R.peerMedia.id) || null;
 
 function accepterAppelsMedia(peer) {
   peer.on("call", (appel) => {
@@ -1380,7 +1482,7 @@ function accepterAppelsMedia(peer) {
 
 function synchroniserMedia() {
   const voulus = new Set();
-  if (R.peer && R.role !== "solo") {
+  if (R.peerMedia && R.role !== "solo") {
     peersActuels().forEach((id) => {
       if (!id || id === monPeerId()) return;
       for (const kind of ["audio", "video"]) {
@@ -1389,10 +1491,17 @@ function synchroniserMedia() {
         voulus.add(cle);
         if (M.appels.has(cle)) continue;
         try {
-          const appel = R.peer.call(id, M.flux[kind], { metadata: { kind } });
+          const appel = R.peerMedia.call(id, M.flux[kind], { metadata: { kind } });
           M.appels.set(cle, appel);
           const fin = () => { if (M.appels.get(cle) === appel) M.appels.delete(cle); };
           appel.on("close", fin); appel.on("error", fin);
+          // la connexion directe peut échouer (réseau mobile, pare-feu) : on le dit au joueur
+          setTimeout(() => {
+            const etat = appel.peerConnection && appel.peerConnection.iceConnectionState;
+            if (M.appels.get(cle) === appel && etat && !["connected", "completed"].includes(etat)) {
+              messageMedia("La voix ou la vidéo ne passe pas avec un joueur (réseau mobile ou pare-feu). Le jeu n'est pas affecté.");
+            }
+          }, 15000);
         } catch (e) { /* appel impossible pour l'instant */ }
       }
     });
@@ -1506,33 +1615,63 @@ document.addEventListener("click", (e) => {
 });
 
 /* ---- Client ---- */
-function rejoindre(code, pseudo) {
-  if (typeof Peer === "undefined") return messageReseau("Le jeu en ligne n'est pas disponible : la bibliothèque réseau n'a pas pu être chargée.", true);
+async function rejoindre(code, pseudo) {
+  if (typeof mqtt === "undefined") return messageReseau("Le jeu en ligne n'est pas disponible : la bibliothèque réseau n'a pas pu être chargée.", true);
   code = String(code || "").trim().toUpperCase();
   if (!/^[A-Z2-9]{5}$/.test(code)) return messageReseau("Le code de la salle comporte 5 caractères.", true);
   quitterReseau();
+  const jeton = ++R.essai;
   messageReseau("Connexion à la salle…");
-  let peer;
-  try { peer = R.usine(null); } catch (e) { return messageReseau("Connexion réseau impossible.", true); }
-  R.peer = peer;
-  const delai = setTimeout(() => { if (R.role !== "client") { quitterReseau(); messageReseau("La salle ne répond pas. Vérifiez le code et réessayez.", true); } }, 15000);
-  accepterAppelsMedia(peer);
-  peer.on("open", () => {
-    const conn = peer.connect("belote-" + code, { reliable: true, serialization: "json" });
-    conn.on("open", () => {
-      clearTimeout(delai);
-      R.role = "client"; R.lienHote = conn; R.code = code;
-      conn.send({ t: "hello", nom: propre(pseudo), peerId: peer.id });
+  const id = idAleatoire(), rubrique = PREFIXE + code + "/";
+  const ouverts = [];
+  let gagnant = null;
+  // On interroge tous les courtiers en parallèle : la salle se trouve sur celui de l'hôte.
+  await new Promise((fin) => {
+    let echecs = 0;
+    const delai = setTimeout(fin, R.T.connexion + 3000);
+    BROKERS.forEach((url) => {
+      connecterMqtt(url, { clientId: "belote-c-" + id + "-" + Math.random().toString(36).slice(2, 6),
+        will: { topic: rubrique + "hote", payload: JSON.stringify({ t: "bye", de: id }), qos: 0 } })
+        .then((client) => {
+          ouverts.push(client);
+          if (gagnant) return;
+          client.on("message", (topic, payload) => {
+            if (gagnant || topic !== rubrique + "presence") return;
+            const m = analyser(payload);
+            if (m && m.t === "salle" && Math.abs(Date.now() - m.ts) < R.T.presence) { gagnant = client; clearTimeout(delai); fin(); }
+          });
+          client.subscribe(rubrique + "presence");
+        })
+        .catch(() => { echecs++; if (echecs === BROKERS.length) { clearTimeout(delai); fin(); } });
     });
-    conn.on("data", traiterMessageClient);
-    conn.on("close", () => { if (R.role === "client") { quitterReseau(); menu(); messageReseau("La connexion avec l'hôte est perdue.", true); } });
   });
-  peer.on("error", (e) => {
-    clearTimeout(delai);
-    if (R.role === "client") return;
-    quitterReseau();
-    messageReseau(e.type === "peer-unavailable" ? "Salle introuvable : vérifiez le code." : "Connexion impossible (" + (e.type || "erreur réseau") + ").", true);
+  const fermer = (sauf) => ouverts.forEach((c) => { if (c !== sauf) try { c.end(true); } catch (e) { /* rien */ } });
+  if (jeton !== R.essai) { fermer(null); return; }
+  if (!gagnant) {
+    fermer(null);
+    return messageReseau(ouverts.length ? "Salle introuvable : vérifiez le code." : "Impossible de joindre le service de salles. Vérifiez votre connexion.", true);
+  }
+  fermer(gagnant);
+  R.role = "client"; R.mqtt = gagnant; R.code = code; R.rubrique = rubrique; R.monId = id; R.dernierVu = Date.now();
+  gagnant.subscribe([rubrique + "c/" + id, rubrique + "tous"]);
+  gagnant.on("message", (topic, payload) => {
+    if (topic !== rubrique + "c/" + id && topic !== rubrique + "tous") return;
+    const m = analyser(payload);
+    if (!m) return;
+    R.dernierVu = Date.now();
+    if (m.t !== "ping") traiterMessageClient(m);
   });
+  const lien = new Lien((msg) => gagnant.publish(rubrique + "hote", JSON.stringify(Object.assign({ de: id }, msg))), null);
+  R.lienHote = lien;
+  creerPeerMedia();
+  lien.send({ t: "hello", nom: propre(pseudo), peerId: (R.peerMedia && R.peerMedia.id) || null });
+  R.minuteries.push(setInterval(() => {
+    lien.send({ t: "ping" });
+    if (Date.now() - R.dernierVu > R.T.perteHote) { quitterReseau(); menu(); messageReseau("La connexion avec l'hôte est perdue.", true); }
+  }, R.T.ping));
+  R.minuteries.push(setTimeout(() => {
+    if (R.role === "client" && R.phase === null) { quitterReseau(); messageReseau("La salle ne répond pas. Vérifiez le code et réessayez.", true); }
+  }, 10000));
 }
 
 function traiterMessageClient(msg) {
@@ -1576,14 +1715,26 @@ async function traiterFiche(msg) {
 }
 
 function quitterReseau() {
+  R.essai++;
   arreterMedia();
+  R.minuteries.forEach((t) => { clearInterval(t); clearTimeout(t); });
+  R.minuteries = [];
   try {
-    if (R.role === "hote") diffuser({ t: "ferme" });
-    for (const p of R.places) if (p && p.lien) try { p.lien.close(); } catch (e) { /* déjà fermé */ }
-    if (R.lienHote) try { R.lienHote.close(); } catch (e) { /* déjà fermé */ }
-    if (R.peer) R.peer.destroy();
+    const c = R.mqtt;
+    if (c) {
+      if (R.role === "hote") {
+        c.publish(R.rubrique + "tous", JSON.stringify({ t: "ferme" }));
+        c.publish(R.rubrique + "presence", "", { retain: true });
+      } else if (R.role === "client" && R.lienHote) {
+        R.lienHote.send({ t: "bye" });
+      }
+      setTimeout(() => { try { c.end(true); } catch (e) { /* déjà fermé */ } }, 300);
+    }
   } catch (e) { /* réseau déjà coupé */ }
-  R.role = "solo"; R.phase = null; R.peer = null; R.lienHote = null; R.code = null;
+  if (R.peerMedia) try { R.peerMedia.destroy(); } catch (e) { /* déjà détruit */ }
+  for (const c of R.clients.values()) c.lien.open = false;
+  R.clients = new Map();
+  R.role = "solo"; R.phase = null; R.mqtt = null; R.rubrique = null; R.peerMedia = null; R.lienHote = null; R.code = null;
   R.places = [null, null, null, null]; R.placesVues = [null, null, null, null];
   R.attentes.clear(); R.fiches.clear(); R.peersVus = [null, null, null, null]; M.signature = "";
   S.moi = 0; S.sieges = ["local", "bot", "bot", "bot"]; S.noms = [null, null, null, null];
