@@ -1832,7 +1832,7 @@ function majRelais() {
     messageMedia(besoin ? "Connexion directe impossible : voix et vidéo passent en mode allégé (qualité réduite)." : "");
   }
 }
-setInterval(majRelais, 1500);
+setInterval(() => { majRelais(); majVisio(); }, 1500);
 
 /* Réception d'un paquet de secours : topic = <rubrique>m/<siège>/<a|v>. */
 function recevoirRelais(topic, payload) {
@@ -1870,6 +1870,9 @@ function recevoirRelais(topic, payload) {
       if (ancien) setTimeout(() => URL.revokeObjectURL(ancien.url), 1000);
     } catch (e) { /* image illisible */ }
   }
+  // les vignettes ne sont redessinées qu'avec la table : on les rafraîchit ici, au plus 3 fois par seconde
+  const maintenant = Date.now();
+  if (maintenant - (RELAIS.derniereMaj || 0) > 350) { RELAIS.derniereMaj = maintenant; majVisio(); }
 }
 
 document.addEventListener("click", (e) => {
