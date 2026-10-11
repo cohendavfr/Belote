@@ -53,6 +53,10 @@ button { font: inherit; color: inherit; }
 .btn.or { background: var(--or); color: var(--or-fg); border-color: var(--or); }
 .btn.or:hover { filter: brightness(1.06); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.actions-tete { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn.danger { border-color: var(--ko); color: var(--ko); }
+.btn.danger:hover { border-color: var(--ko); background: var(--bg); }
+.info.avis { justify-self: center; background: #8a2c24; color: #fff; border-radius: 999px; padding: 5px 14px; font-weight: 600; }
 .btn .rouge { color: var(--rouge); }
 
 .jeu { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
@@ -188,7 +192,7 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
   <header class="barre">
     <h1>Belote</h1>
     <div class="scores" id="scores" aria-live="polite"></div>
-    <button class="btn" id="btn-nouvelle" type="button">Nouvelle partie</button>
+    <div class="actions-tete"><button class="btn" id="btn-nouvelle" type="button">Nouvelle partie</button><button class="btn danger" id="btn-quitter" type="button" hidden>Quitter la partie</button></div>
   </header>
   <div class="jeu">
     <section class="table" id="table" aria-label="Table de jeu">
@@ -197,7 +201,7 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
       <div class="siege s1" id="siege-1"><div class="siege-visio"></div><div class="siege-corps"></div></div>
       <div class="siege s3" id="siege-3"><div class="siege-visio"></div><div class="siege-corps"></div></div>
       <div class="centre">
-        <div class="info" id="info"></div>
+        <div class="info" id="info" aria-live="polite"></div>
         <div class="pli" id="pli"></div>
         <div class="action" id="action" aria-live="polite"></div>
       </div>
@@ -629,6 +633,7 @@ const S = {
   contrat: null, mult: 1, retournee: null, tour: null, gagnant: null, bulles: {}, journal: [],
   partieId: 0, attenteCarte: null, enchereCourante: null, voix: "fr",
   moi: 0, sieges: ["local", "bot", "bot", "bot"], noms: [null, null, null, null], pilote: null, sansDelai: false,
+  avis: null, // { txt, jusqua } : message affiché un moment sur le tapis (joueur parti...)
 };
 /* Perspective : S.moi est la place de ce navigateur ; sieges[q] vaut "local", "distant" (autre humain) ou "bot". */
 const rel = (q) => (q - S.moi + 4) % 4;
@@ -672,7 +677,10 @@ function render() {
     lignes = [`<div class="titre">Retournée</div>`, `<div>${carteHtml(S.retournee, "mini")}</div>`];
   }
   $("#contrat").innerHTML = lignes.join("");
-  $("#info").textContent = S.toast ? fmt(S.toast) : "";
+  const avis = S.avis && Date.now() < S.avis.jusqua ? S.avis.txt : null;
+  $("#info").textContent = avis || (S.toast ? fmt(S.toast) : "");
+  $("#info").className = "info" + (avis ? " avis" : "");
+  majBoutonQuitter();
   let pli = "";
   for (const x of S.pli) pli += `<div class="p${rel(x.j)} ${S.gagnant === x.j ? "gagnant" : ""}">${carteHtml(x.carte)}</div>`;
   if (!S.pli.length && S.retournee && S.atout === null) pli = `<div class="p0" style="grid-area:2/2">${carteHtml(S.retournee)}</div>`;
@@ -689,6 +697,17 @@ function render() {
     const label = `${c.v} de ${NOM_COULEUR[c.c]}`;
     return `<button type="button" class="${cls}" data-k="${k(c)}" aria-label="${label}" ${jouable ? "" : "disabled"}><span class="coin"><b>${ABREGE[c.v]}</b><i>${SYM[c.c]}</i></span><span class="gros">${SYM[c.c]}</span></button>`;
   }).join("");
+}
+function majBoutonQuitter() {
+  const b = document.querySelector("#btn-quitter");
+  if (b) b.hidden = R.role === "solo";
+}
+/* Affiche un avis sur le tapis pendant quelques secondes. */
+function afficherAvis(txt, ms = 7000) {
+  S.avis = { txt, jusqua: Date.now() + ms };
+  log(txt);
+  render();
+  setTimeout(() => render(), ms + 100);
 }
 function renderJournal() { if (!S.auto) $("#journal").innerHTML = S.journal.map((m) => `<li>${esc(fmt(m))}</li>`).join(""); }
 
@@ -1226,6 +1245,7 @@ function diffuserEtat() {
       pli: S.pli, bulles: S.bulles, journal: S.journal, enchereCourante: S.enchereCourante, toast: S.toast,
       noms: R.nomsAbs.map((n, i) => (i === q ? null : n)),
       peers: R.places.map((p) => (p && p.peerId) || null),
+      avis: S.avis && Date.now() < S.avis.jusqua ? S.avis.txt : null,
       mains: S.mains.map((m, i) => (i === q ? m : m.length)),
     });
   }
@@ -1241,6 +1261,7 @@ function diffuserSalle() {
 }
 
 function afficherSalle() {
+  majBoutonQuitter();
   const hote = R.role === "hote";
   const places = hote ? R.places : R.placesVues;
   const place = (q) => {
@@ -1448,6 +1469,7 @@ function accepter(conn) {
     const q = conn._siege;
     if (q === undefined || !R.places[q] || R.places[q].lien !== conn) return;
     if (msg.t === "siege" && Number.isInteger(msg.q) && msg.q >= 0 && msg.q < 4) deplacer(q, msg.q);
+    else if (msg.t === "quitte") joueurParti(conn, true);
     else if (msg.t === "peer" && typeof msg.peerId === "string") {
       R.places[q].peerId = msg.peerId.slice(0, 64);
       diffuserSalle(); synchroniserMedia();
@@ -1462,7 +1484,7 @@ function accepter(conn) {
   conn.on("close", () => joueurParti(conn));
 }
 
-function joueurParti(conn) {
+function joueurParti(conn, volontaire) {
   const q = conn._siege;
   if (q === undefined || !R.places[q] || R.places[q].lien !== conn) return;
   const nomParti = R.places[q].nom;
@@ -1470,8 +1492,8 @@ function joueurParti(conn) {
   if (R.phase === "salle") { diffuserSalle(); afficherSalle(); synchroniserMedia(); return; }
   // En pleine partie : un bot prend la place et décide à sa place.
   S.sieges[q] = "bot"; R.nomsAbs[q] = null; S.noms[q] = null;
-  log(`${esc(nomParti)} a quitté la partie : un bot le remplace.`);
   synchroniserMedia();
+  afficherAvis(volontaire ? `${nomParti} a quitté la partie. Un bot prend sa place.` : `${nomParti} a été déconnecté. Un bot prend sa place.`);
   for (const [id, a] of [...R.attentes]) {
     if (a.p === q) { R.attentes.delete(id); a.res(reponseBot(q, a.kind, a.d)); }
   }
@@ -2033,7 +2055,12 @@ function traiterMessageClient(msg) {
     case "fiche": traiterFiche(msg); break;
     case "voix": parlerLocal(msg.p, msg.type, msg.args || []); break;
     case "refus": quitterReseau(); menu(); messageReseau(msg.raison || "Salle indisponible.", true); break;
-    case "ferme": quitterReseau(); menu(); messageReseau("L'hôte a fermé la salle.", true); break;
+    case "ferme": {
+      const par = typeof msg.nom === "string" && msg.nom ? msg.nom : "L'hôte";
+      quitterReseau(); menu();
+      messageReseau(`${par} a quitté la partie : la salle est fermée.`, true);
+      break;
+    }
   }
 }
 function appliquerEtat(m) {
@@ -2041,6 +2068,7 @@ function appliquerEtat(m) {
   S.atout = m.atout; S.preneur = m.preneur; S.contrat = m.contrat; S.mult = m.mult; S.retournee = m.retournee;
   S.tour = m.tour; S.gagnant = m.gagnant; S.pli = m.pli; S.bulles = m.bulles; S.journal = m.journal;
   S.enchereCourante = m.enchereCourante; S.toast = m.toast; S.noms = m.noms;
+  if (m.avis) { if (!S.avis || S.avis.txt !== m.avis) S.avis = { txt: m.avis, jusqua: Date.now() + 7000 }; } else S.avis = null;
   S.sieges = [0, 1, 2, 3].map((q) => (q === m.L ? "local" : "distant"));
   S.mains = m.mains.map((x) => (Array.isArray(x) ? x : new Array(x).fill(null)));
   const signature = JSON.stringify(m.peers || []);
@@ -2058,6 +2086,8 @@ async function traiterFiche(msg) {
 }
 
 function quitterReseau() {
+  const nomHote = R.role === "hote" && R.places[S.moi] ? R.places[S.moi].nom : "L'hôte";
+  if (R.role === "hote") diffuser({ t: "ferme", nom: nomHote }); // liens directs : message explicite avant la coupure
   R.essai++;
   arreterMedia();
   R.minuteries.forEach((t) => { clearInterval(t); clearTimeout(t); });
@@ -2066,7 +2096,7 @@ function quitterReseau() {
     const c = R.mqtt;
     if (c) {
       if (R.role === "hote") {
-        c.publish(R.rubrique + "tous", JSON.stringify({ t: "ferme" }));
+        c.publish(R.rubrique + "tous", JSON.stringify({ t: "ferme", nom: nomHote }));
         c.publish(R.rubrique + "presence", "", { retain: true });
       } else if (R.role === "client" && R.lienHote) {
         R.lienHote.send({ t: "bye" });
@@ -2076,13 +2106,39 @@ function quitterReseau() {
   } catch (e) { /* réseau déjà coupé */ }
   if (R.peerMedia) try { R.peerMedia.destroy(); } catch (e) { /* déjà détruit */ }
   for (const c of R.clients.values()) c.lien.open = false;
-  for (const p of R.places) if (p && p.lien) p.lien.couper();
-  if (R.lienHote) R.lienHote.couper();
+  // les connexions directes sont coupées un instant plus tard : le message d'adieu a le temps de partir
+  const liensDirects = R.places.filter((p) => p && p.lien).map((p) => p.lien).concat(R.lienHote ? [R.lienHote] : []);
+  setTimeout(() => liensDirects.forEach((l) => l.couper()), 300);
   R.clients = new Map();
   R.role = "solo"; R.phase = null; R.mqtt = null; R.rubrique = null; R.peerMedia = null; R.lienHote = null; R.code = null;
   R.places = [null, null, null, null]; R.placesVues = [null, null, null, null];
   R.attentes.clear(); R.fiches.clear(); R.peersVus = [null, null, null, null]; M.signature = "";
   S.moi = 0; S.sieges = ["local", "bot", "bot", "bot"]; S.noms = [null, null, null, null];
+  S.avis = null;
+  majBoutonQuitter();
+}
+function quitterVolontaire() {
+  if (R.role === "client" && R.lienHote) R.lienHote.send({ t: "quitte" });
+  const attente = R.role === "client" ? 150 : 0; // laisse partir le message avant de couper
+  setTimeout(() => { quitterReseau(); R.message = null; menu(); }, attente);
+}
+function confirmerQuitter() {
+  if (R.role === "solo") return;
+  const hote = R.role === "hote";
+  afficherFiche(`<h2>Quitter la partie ?</h2>
+    <p class="message">${hote
+      ? "Vous êtes l'hôte : la salle sera fermée pour tous les joueurs."
+      : "Les autres joueurs en seront informés et un bot prendra votre place."}</p>
+    <div class="actions-media">
+      <button class="btn danger" id="quitter-oui" type="button">Quitter</button>
+      <button class="btn or" id="quitter-non" type="button">Rester</button>
+    </div>`);
+  $("#quitter-oui").addEventListener("click", quitterVolontaire);
+  $("#quitter-non").addEventListener("click", () => {
+    cacherFiche();
+    // si une fiche (bilan) était affichée avant, la partie la réaffichera à son prochain événement
+  });
+  $("#quitter-non").focus();
 }
 function messageReseau(txt, erreur) {
   R.message = { txt, erreur: !!erreur };
@@ -2163,6 +2219,7 @@ function menu() {
 }
 
 $("#btn-nouvelle").addEventListener("click", () => { R.message = null; menu(); });
+$("#btn-quitter").addEventListener("click", confirmerQuitter);
 { const r = lireReglages(); if (r.mode) S.mode = r.mode; if (r.niveau) S.niveau = r.version >= 2 || r.niveau !== "malin" ? r.niveau : "expert"; if (r.cible) S.cible = r.cible; if (r.voix) S.voix = r.voix; S.rapide = !!r.rapide; }
 render();
 menu();
