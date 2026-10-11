@@ -166,6 +166,7 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 @media (max-width: 560px) { .tuile { --tw: 56px; } .s2 .tuile, .s0 .tuile { --tw: 74px; } .tuile .bouton-media { width: 22px; height: 22px; } .tuile .bouton-media svg { width: 12px; height: 12px; } }
 .tuile video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .tuile video.miroir { transform: scaleX(-1); }
+.tuile img.relais { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .tuile .visage { width: 50%; color: #fff; opacity: 0.4; }
 .tuile .etiquette { position: absolute; left: 4px; bottom: 4px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #000b; color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 12px; }
 .tuile .son { position: absolute; left: 6px; top: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px #0007; }
@@ -1350,9 +1351,10 @@ function demarrerHote(client, code, id, pseudo) {
   R.clients = new Map();
   S.moi = 0;
   const presence = () => { try { client.publish(rubrique + "presence", JSON.stringify({ t: "salle", ts: Date.now() }), { retain: true }); } catch (e) { /* hors ligne */ } };
-  client.subscribe(rubrique + "hote");
+  client.subscribe([rubrique + "hote", rubrique + "m/+/a", rubrique + "m/+/v"]);
   presence();
   client.on("message", (topic, payload) => {
+    if (topic.startsWith(rubrique + "m/")) { recevoirRelais(topic, payload); return; }
     if (topic !== rubrique + "hote") return;
     const m = analyser(payload);
     if (!m || typeof m.de !== "string" || m.de.length > 40) return;
@@ -1501,15 +1503,9 @@ function synchroniserMedia() {
         try {
           const appel = R.peerMedia.call(id, M.flux[kind], { metadata: { kind } });
           M.appels.set(cle, appel);
+          RELAIS.debutAppel.set(cle, Date.now());
           const fin = () => { if (M.appels.get(cle) === appel) M.appels.delete(cle); };
           appel.on("close", fin); appel.on("error", fin);
-          // la connexion directe peut échouer (réseau mobile, pare-feu) : on le dit au joueur
-          setTimeout(() => {
-            const etat = appel.peerConnection && appel.peerConnection.iceConnectionState;
-            if (M.appels.get(cle) === appel && etat && !["connected", "completed"].includes(etat)) {
-              messageMedia("La voix ou la vidéo ne passe pas avec un joueur (réseau mobile ou pare-feu). Le jeu n'est pas affecté.");
-            }
-          }, 15000);
         } catch (e) { /* appel impossible pour l'instant */ }
       }
     });
@@ -1531,7 +1527,7 @@ function messageMedia(txt) {
 }
 async function basculerMedia(kind) {
   contexteAudio();
-  if (M.flux[kind]) { arreterFlux(kind); synchroniserMedia(); majBoutonsMedia(); return; }
+  if (M.flux[kind]) { arreterFlux(kind); synchroniserMedia(); majBoutonsMedia(); majRelais(); return; }
   const md = typeof navigator !== "undefined" && navigator.mediaDevices;
   if (!md || !md.getUserMedia) { messageMedia("Ce navigateur ne permet pas d'utiliser le micro ou la caméra ici."); return; }
   try {
@@ -1542,7 +1538,7 @@ async function basculerMedia(kind) {
   } catch (e) {
     messageMedia(kind === "audio" ? "Accès au micro refusé ou indisponible." : "Accès à la caméra refusé ou indisponible.");
   }
-  synchroniserMedia(); majBoutonsMedia();
+  synchroniserMedia(); majBoutonsMedia(); majRelais();
 }
 function arreterFlux(kind) {
   const f = M.flux[kind];
@@ -1551,6 +1547,7 @@ function arreterFlux(kind) {
 }
 function arreterMedia() {
   arreterFlux("audio"); arreterFlux("video");
+  arreterRelaisAudio(); arreterRelaisVideo(); RELAIS.actif = false;
   for (const appel of M.appels.values()) try { appel.close(); } catch (e) { /* déjà fermé */ }
   for (const r of M.recus.values()) try { r.appel.close(); } catch (e) { /* déjà fermé */ }
   M.appels.clear(); M.recus.clear();
@@ -1617,7 +1614,9 @@ function majParole() {
   document.querySelectorAll(".tuile").forEach((t) => {
     const q = Number(t.dataset.q);
     const flux = q === S.moi ? M.flux.audio : (M.recus.get("audio:" + (peersActuels()[q] || "")) || {}).flux;
-    t.classList.toggle("parle", niveauDe(flux) > 0.035);
+    const direct = niveauDe(flux) > 0.035;
+    const secours = q !== S.moi && relaisAudioFrais(q) && RELAIS.niveaux.get(q) > 0.035;
+    t.classList.toggle("parle", direct || secours);
   });
 }
 
@@ -1648,7 +1647,7 @@ function majVisio() {
     if (!t) {
       t = document.createElement("div");
       t.className = "tuile"; t.dataset.q = String(q);
-      t.innerHTML = `${TETE_SVG}<video playsinline autoplay muted hidden></video><span class="son" hidden></span><span class="etiquette"></span>` +
+      t.innerHTML = `${TETE_SVG}<video playsinline autoplay muted hidden></video><img class="relais" alt="" hidden><span class="son" hidden></span><span class="etiquette"></span>` +
         (soi ? `<span class="boutons"><button type="button" class="bouton-media" data-media="audio" aria-pressed="false" aria-label="Micro">${MICRO_SVG}</button><button type="button" class="bouton-media" data-media="video" aria-pressed="false" aria-label="Caméra">${CAMERA_SVG}</button></span>` : "");
     }
     if (t.parentNode !== conteneur) conteneur.appendChild(t);
@@ -1661,8 +1660,15 @@ function majVisio() {
     }
     video.classList.toggle("miroir", soi);
     video.hidden = !flux;
-    t.querySelector(".visage").style.display = flux ? "none" : "";
-    const audioActif = soi ? !!M.flux.audio : !!(id && M.recus.has("audio:" + id));
+    // mode de secours : image reçue par le serveur de messages quand la connexion directe ne passe pas
+    const rv = !soi && !flux ? RELAIS.images.get(q) : null;
+    const imageFraiche = !!rv && Date.now() - rv.ts < 4000;
+    const img = t.querySelector("img.relais");
+    if (imageFraiche) { if (img.dataset.url !== rv.url) { img.src = rv.url; img.dataset.url = rv.url; } img.hidden = false; }
+    else { img.hidden = true; }
+    t.querySelector(".visage").style.display = flux || imageFraiche ? "none" : "";
+    const relaisSon = !soi && !(id && M.recus.has("audio:" + id)) && relaisAudioFrais(q);
+    const audioActif = soi ? !!M.flux.audio : !!(id && M.recus.has("audio:" + id)) || relaisSon;
     t.querySelector(".son").hidden = !audioActif;
     t.querySelector(".etiquette").textContent = nomVisio(q);
     // lecteur audio (autres joueurs) : rattaché au document, pas masqué par display:none
@@ -1694,6 +1700,172 @@ function majBoutonsMedia() {
     if (b.classList.contains("bouton-media")) b.setAttribute("aria-label", nomBtn + (actif ? " activé : cliquer pour couper" : " éteint : cliquer pour activer"));
     else b.textContent = nomBtn + (actif ? " activé" : "");
   });
+}
+
+/* ---- Mode de secours : voix et vidéo allégées via le serveur de messages ---- */
+/* Quand la connexion directe ne s'établit pas (4G, pare-feu), le son (8 kHz, µ-law) et une image
+   réduite toutes les 0,4 s transitent par le même serveur de messages que le jeu. Qualité téléphone. */
+const RELAIS = {
+  actif: false, proc: null, src: null, sourceCtx: null, tampon: [], videoEl: null, canvas: null, minuterieVideo: null,
+  prochain: new Map(),      // siège -> prochain instant de lecture
+  niveaux: new Map(),       // siège -> niveau sonore du dernier paquet
+  vusAudio: new Map(),      // siège -> date du dernier paquet audio
+  images: new Map(),        // siège -> { url, ts }
+  debutAppel: new Map(),    // "kind:peerId" -> date de création de l'appel
+};
+const FREQ_RELAIS = 8000, PAQUET_RELAIS = 1600; // 200 ms
+
+function muLawEncode(s) {
+  const BIAS = 0x84, CLIP = 32635;
+  const signe = (s >> 8) & 0x80;
+  if (signe) s = -s;
+  if (s > CLIP) s = CLIP;
+  s += BIAS;
+  let exposant = 7;
+  for (let masque = 0x4000; (s & masque) === 0 && exposant > 0; masque >>= 1) exposant--;
+  const mantisse = (s >> (exposant + 3)) & 0x0f;
+  return ~(signe | (exposant << 4) | mantisse) & 0xff;
+}
+function muLawDecode(u) {
+  u = ~u & 0xff;
+  const signe = u & 0x80, exposant = (u >> 4) & 7, mantisse = u & 15;
+  let s = (((mantisse << 3) + 0x84) << exposant) - 0x84;
+  return signe ? -s : s;
+}
+const relaisAudioFrais = (q) => Date.now() - (RELAIS.vusAudio.get(q) || 0) < 1500;
+
+function publierRelais(sorte, octets) {
+  if (!R.mqtt || R.role === "solo" || !R.rubrique) return;
+  try { R.mqtt.publish(R.rubrique + "m/" + S.moi + "/" + sorte, octets); } catch (e) { /* hors ligne */ }
+}
+
+/* Vrai si au moins un joueur ne reçoit pas notre flux par la connexion directe. */
+function relaisNecessaire() {
+  if (R.role === "solo" || !(M.flux.audio || M.flux.video)) return false;
+  const autres = siegesHumains().filter((q) => q !== S.moi);
+  if (!autres.length) return false;
+  const peers = peersActuels();
+  const maintenant = Date.now();
+  for (const q of autres) {
+    const id = peers[q];
+    for (const kind of ["audio", "video"]) {
+      if (!M.flux[kind]) continue;
+      if (!id) return true;
+      const appel = M.appels.get(kind + ":" + id);
+      const etat = appel && appel.peerConnection && appel.peerConnection.iceConnectionState;
+      if (etat === "connected" || etat === "completed") continue;
+      const debut = RELAIS.debutAppel.get(kind + ":" + id) || maintenant;
+      if (maintenant - debut > 5000) return true;
+    }
+  }
+  return false;
+}
+
+function demarrerRelaisAudio() {
+  if (RELAIS.proc || !M.flux.audio) return;
+  const ctx = contexteAudio();
+  if (!ctx || !ctx.createScriptProcessor) return;
+  try {
+    RELAIS.src = ctx.createMediaStreamSource(M.flux.audio);
+    RELAIS.proc = ctx.createScriptProcessor(2048, 1, 1);
+    const ratio = ctx.sampleRate / FREQ_RELAIS;
+    let reste = 0, somme = 0, n = 0, calme = 0;
+    RELAIS.proc.onaudioprocess = (e) => {
+      const entree = e.inputBuffer.getChannelData(0);
+      for (let i = 0; i < entree.length; i++) {
+        somme += entree[i]; n++; reste++;
+        if (reste >= ratio) { RELAIS.tampon.push(somme / n); somme = 0; n = 0; reste -= ratio; }
+      }
+      while (RELAIS.tampon.length >= PAQUET_RELAIS) {
+        const bloc = RELAIS.tampon.splice(0, PAQUET_RELAIS);
+        let energie = 0;
+        for (const v of bloc) energie += v * v;
+        const niveau = Math.sqrt(energie / bloc.length);
+        if (niveau > 0.008) calme = 0; else calme++;
+        if (calme > 3) continue; // silence prolongé : on n'envoie rien
+        const octets = new Uint8Array(bloc.length);
+        for (let i = 0; i < bloc.length; i++) octets[i] = muLawEncode(Math.max(-1, Math.min(1, bloc[i])) * 32767);
+        publierRelais("a", octets);
+      }
+    };
+    RELAIS.src.connect(RELAIS.proc);
+    RELAIS.proc.connect(ctx.destination);
+  } catch (e) { arreterRelaisAudio(); }
+}
+function arreterRelaisAudio() {
+  try { if (RELAIS.proc) { RELAIS.proc.onaudioprocess = null; RELAIS.proc.disconnect(); } } catch (e) { /* rien */ }
+  try { if (RELAIS.src) RELAIS.src.disconnect(); } catch (e) { /* rien */ }
+  RELAIS.proc = null; RELAIS.src = null; RELAIS.tampon = [];
+}
+function demarrerRelaisVideo() {
+  if (RELAIS.minuterieVideo || !M.flux.video) return;
+  try {
+    RELAIS.videoEl = document.createElement("video");
+    RELAIS.videoEl.muted = true; RELAIS.videoEl.setAttribute("playsinline", ""); RELAIS.videoEl.srcObject = M.flux.video;
+    const p = RELAIS.videoEl.play(); if (p && p.catch) p.catch(() => {});
+    RELAIS.canvas = document.createElement("canvas");
+    RELAIS.canvas.width = 160; RELAIS.canvas.height = 120;
+    const g = RELAIS.canvas.getContext("2d");
+    RELAIS.minuterieVideo = setInterval(() => {
+      if (!M.flux.video || RELAIS.videoEl.readyState < 2) return;
+      try {
+        g.drawImage(RELAIS.videoEl, 0, 0, 160, 120);
+        RELAIS.canvas.toBlob((b) => { if (b) b.arrayBuffer().then((buf) => publierRelais("v", new Uint8Array(buf))); }, "image/jpeg", 0.5);
+      } catch (e) { /* image indisponible */ }
+    }, 400);
+  } catch (e) { arreterRelaisVideo(); }
+}
+function arreterRelaisVideo() {
+  clearInterval(RELAIS.minuterieVideo); RELAIS.minuterieVideo = null;
+  if (RELAIS.videoEl) { RELAIS.videoEl.srcObject = null; RELAIS.videoEl = null; }
+}
+function majRelais() {
+  const besoin = relaisNecessaire();
+  if (besoin && M.flux.audio) demarrerRelaisAudio(); else arreterRelaisAudio();
+  if (besoin && M.flux.video) demarrerRelaisVideo(); else arreterRelaisVideo();
+  if (besoin !== RELAIS.actif) {
+    RELAIS.actif = besoin;
+    messageMedia(besoin ? "Connexion directe impossible : voix et vidéo passent en mode allégé (qualité réduite)." : "");
+  }
+}
+setInterval(majRelais, 1500);
+
+/* Réception d'un paquet de secours : topic = <rubrique>m/<siège>/<a|v>. */
+function recevoirRelais(topic, payload) {
+  const m = /\/m\/(\d)\/([av])$/.exec(topic);
+  if (!m) return;
+  const q = Number(m[1]);
+  if (q === S.moi || R.role === "solo") return;
+  const id = peersActuels()[q];
+  if (m[2] === "a") {
+    if (id && M.recus.has("audio:" + id)) return;          // la connexion directe est là : on l'utilise
+    const octets = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
+    const ctx = contexteAudio();
+    if (!ctx || !octets.length) return;
+    const flottants = new Float32Array(octets.length);
+    let energie = 0;
+    for (let i = 0; i < octets.length; i++) { const v = muLawDecode(octets[i]) / 32768; flottants[i] = v; energie += v * v; }
+    RELAIS.niveaux.set(q, Math.sqrt(energie / octets.length));
+    RELAIS.vusAudio.set(q, Date.now());
+    try {
+      const buf = ctx.createBuffer(1, flottants.length, FREQ_RELAIS);
+      buf.getChannelData(0).set(flottants);
+      const source = ctx.createBufferSource();
+      source.buffer = buf; source.connect(ctx.destination);
+      let t = Math.max(ctx.currentTime + 0.3, RELAIS.prochain.get(q) || 0);
+      if (t - ctx.currentTime > 1.5) t = ctx.currentTime + 0.3;
+      source.start(t);
+      RELAIS.prochain.set(q, t + flottants.length / FREQ_RELAIS);
+    } catch (e) { /* lecture impossible */ }
+  } else {
+    if (id && M.recus.has("video:" + id)) return;
+    try {
+      const url = URL.createObjectURL(new Blob([payload], { type: "image/jpeg" }));
+      const ancien = RELAIS.images.get(q);
+      RELAIS.images.set(q, { url, ts: Date.now() });
+      if (ancien) setTimeout(() => URL.revokeObjectURL(ancien.url), 1000);
+    } catch (e) { /* image illisible */ }
+  }
 }
 
 document.addEventListener("click", (e) => {
@@ -1743,8 +1915,9 @@ async function rejoindre(code, pseudo) {
   }
   fermer(gagnant);
   R.role = "client"; R.mqtt = gagnant; R.code = code; R.rubrique = rubrique; R.monId = id; R.dernierVu = Date.now();
-  gagnant.subscribe([rubrique + "c/" + id, rubrique + "tous"]);
+  gagnant.subscribe([rubrique + "c/" + id, rubrique + "tous", rubrique + "m/+/a", rubrique + "m/+/v"]);
   gagnant.on("message", (topic, payload) => {
+    if (topic.startsWith(rubrique + "m/")) { recevoirRelais(topic, payload); return; }
     if (topic !== rubrique + "c/" + id && topic !== rubrique + "tous") return;
     const m = analyser(payload);
     if (!m) return;
