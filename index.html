@@ -180,6 +180,13 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 .tuile .etiquette { display: none; position: absolute; left: 4px; bottom: 4px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #000b; color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 12px; }
 .tuile .son { position: absolute; left: 6px; top: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px #0007; }
 .actions-media { display: flex; flex-wrap: wrap; gap: 8px; }
+.pile { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; }
+.pile .tas { position: relative; display: inline-block; width: 30px; height: 40px; }
+.pile .tas i { position: absolute; width: 26px; height: 36px; border-radius: 4px; border: 2px solid var(--carte);
+  background: repeating-linear-gradient(45deg, var(--feutre-2) 0 4px, #2d7a5c 4px 8px); box-shadow: 0 1px 2px #0006; }
+.pile b { font: 700 13px/1 var(--font-titre); background: #0000006a; border-radius: 999px; padding: 3px 7px; }
+.carte-vol { position: fixed; z-index: 30; margin: 0; pointer-events: none; transition: transform 0.55s cubic-bezier(0.5, 0, 0.75, 0.4), opacity 0.55s; will-change: transform; }
+@media (prefers-reduced-motion: reduce) { .carte-vol { transition: none; } }
 .verdict { font-weight: 700; }
 .verdict.ok { color: var(--ok); } .verdict.ko { color: var(--ko); }
 .rouge { color: var(--rouge); }
@@ -634,6 +641,7 @@ const S = {
   partieId: 0, attenteCarte: null, enchereCourante: null, voix: "fr",
   moi: 0, sieges: ["local", "bot", "bot", "bot"], noms: [null, null, null, null], pilote: null, sansDelai: false,
   avis: null, // { txt, jusqua } : message affiché un moment sur le tapis (joueur parti...)
+  plisGagnes: [0, 0, 0, 0], // plis ramassés par chaque joueur dans la donne
 };
 /* Perspective : S.moi est la place de ce navigateur ; sieges[q] vaut "local", "distant" (autre humain) ou "bot". */
 const rel = (q) => (q - S.moi + 4) % 4;
@@ -659,8 +667,11 @@ function render() {
   for (let q = 0; q < 4; q++) {
     const plaque = `<span class="plaque ${S.tour === q ? "actif" : ""}">${esc(nom(q))}${S.donneur === q ? '<span class="donneur">Donneur</span>' : ""}</span>`;
     const bulle = `<div class="bulle">${S.bulles[q] || ""}</div>`;
-    const corps = q === S.moi ? plaque + bulle
-      : `${plaque}<span class="carte dos"><span class="nb">${S.mains[q].length}</span></span>${bulle}`;
+    const n = S.plisGagnes[q] || 0;
+    const tas = n ? `<span class="pile" title="Plis gagnés : ${n}" aria-label="${n} pli${n > 1 ? "s" : ""} gagné${n > 1 ? "s" : ""}"><span class="tas">${
+      Array.from({ length: Math.min(n, 5) }, (_, i) => `<i style="left:${i * 2}px;top:${(4 - i) * 2}px"></i>`).join("")}</span><b>${n}</b></span>` : "";
+    const corps = q === S.moi ? plaque + tas + bulle
+      : `${plaque}<span class="carte dos"><span class="nb">${S.mains[q].length}</span></span>${tas}${bulle}`;
     $("#siege-" + rel(q) + " .siege-corps").innerHTML = corps;
   }
   // contrat (en haut à gauche de la table)
@@ -684,7 +695,14 @@ function render() {
   let pli = "";
   for (const x of S.pli) pli += `<div class="p${rel(x.j)} ${S.gagnant === x.j ? "gagnant" : ""}">${carteHtml(x.carte)}</div>`;
   if (!S.pli.length && S.retournee && S.atout === null) pli = `<div class="p0" style="grid-area:2/2">${carteHtml(S.retournee)}</div>`;
+  // un pli vient d'être ramassé : les cartes vont rejoindre le tas du joueur qui l'a gagné
+  const anciennes = [...document.querySelectorAll("#pli > div")];
+  const collecte = anciennes.length === 4 && S.pli.length === 0 && RENDU.gagnant !== null
+    ? { cartes: anciennes.map((d) => ({ el: d.firstElementChild || d, r: d.getBoundingClientRect() })), gagnant: RENDU.gagnant } : null;
   $("#pli").innerHTML = pli;
+  if (S.pli.length === 4 && S.gagnant !== null) RENDU.gagnant = S.gagnant;
+  if (S.pli.length === 0) RENDU.gagnant = null;
+  if (collecte) animerCollecte(collecte.cartes, collecte.gagnant);
   // main
   const main = trierMain(S.mains[S.moi], S.atout);
   const att = S.attenteCarte;
@@ -697,6 +715,26 @@ function render() {
     const label = `${c.v} de ${NOM_COULEUR[c.c]}`;
     return `<button type="button" class="${cls}" data-k="${k(c)}" aria-label="${label}" ${jouable ? "" : "disabled"}><span class="coin"><b>${ABREGE[c.v]}</b><i>${SYM[c.c]}</i></span><span class="gros">${SYM[c.c]}</span></button>`;
   }).join("");
+}
+const RENDU = { gagnant: null };
+/* Fait voler les 4 cartes du pli vers le tas du gagnant (clones fixes, supprimés à l'arrivée). */
+function animerCollecte(cartes, gagnant) {
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const cible = document.querySelector(`#siege-${rel(gagnant)} .pile`) || document.querySelector(`#siege-${rel(gagnant)}`);
+  if (!cible) return;
+  const rc = cible.getBoundingClientRect();
+  const cx = rc.left + rc.width / 2, cy = rc.top + rc.height / 2;
+  const clones = cartes.map(({ el, r }, i) => {
+    const c = el.cloneNode(true);
+    c.classList.add("carte-vol");
+    Object.assign(c.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px", transitionDelay: i * 40 + "ms" });
+    document.body.appendChild(c);
+    return { c, dx: cx - (r.left + r.width / 2), dy: cy - (r.top + r.height / 2) };
+  });
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    clones.forEach(({ c, dx, dy }) => { c.style.transform = `translate(${dx}px, ${dy}px) scale(0.35)`; c.style.opacity = "0.2"; });
+  }));
+  setTimeout(() => clones.forEach(({ c }) => c.remove()), 900);
 }
 function majBoutonQuitter() {
   const b = document.querySelector("#btn-quitter");
@@ -1055,6 +1093,7 @@ async function encheresCoinche(mains, donneur) {
 
 async function jouerDonne(donneur) {
   const jeu = melanger(creerJeu());
+  S.plisGagnes = [0, 0, 0, 0];
   Object.assign(S, { pli: [], vus: [], atout: null, preneur: null, contrat: null, mult: 1, retournee: null, tour: null, gagnant: null, bulles: {}, enchereCourante: null, toast: null, donneur });
   let mains, preneur, atout, contrat = null, mult = 1;
 
@@ -1119,6 +1158,7 @@ async function jouerDonne(donneur) {
     log(`Pli ${numero + 1} : ${N(gagnant)} (+${gain})`);
     await pause(1300);
     S.vus.push(...S.pli);
+    S.plisGagnes[gagnant]++;
     meneur = gagnant;
   }
   S.pli = []; S.gagnant = null; render();
@@ -1228,6 +1268,7 @@ const R = {
   lienHote: null,                     // client : lien vers l'hôte
   attentes: new Map(), fiches: new Map(), idDemande: 0, idFiche: 0,
   nomsAbs: [null, null, null, null], message: null,
+  absents: {},          // hôte : siège -> { nom, jeton } d'un joueur parti, qui peut revenir
   peersVus: [null, null, null, null],   // client : identifiants WebRTC des joueurs, par siège
 };
 const ORDRE_PLACES = [0, 2, 1, 3]; // le 2e joueur devient le partenaire de l'hôte
@@ -1246,6 +1287,7 @@ function diffuserEtat() {
       noms: R.nomsAbs.map((n, i) => (i === q ? null : n)),
       peers: R.places.map((p) => (p && p.peerId) || null),
       avis: S.avis && Date.now() < S.avis.jusqua ? S.avis.txt : null,
+      plisGagnes: S.plisGagnes,
       mains: S.mains.map((m, i) => (i === q ? m : m.length)),
     });
   }
@@ -1320,6 +1362,18 @@ class Lien {
   }
 }
 const idAleatoire = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+/* Identité stable de ce navigateur : permet de reprendre sa place après avoir quitté une partie. */
+let jetonMemoire = null;
+function jetonJoueur() {
+  try {
+    let t = localStorage.getItem("belote-jeton");
+    if (!t) { t = idAleatoire() + idAleatoire(); localStorage.setItem("belote-jeton", t); }
+    return t;
+  } catch (e) {
+    if (!jetonMemoire) jetonMemoire = idAleatoire() + idAleatoire();
+    return jetonMemoire;
+  }
+}
 const analyser = (payload) => { try { return JSON.parse(payload.toString()); } catch (e) { return null; } };
 
 function connecterMqtt(url, opts) {
@@ -1448,7 +1502,8 @@ function creerPeerMedia() {
 function declarerPeerId(id) {
   if (R.role === "hote") {
     if (R.places[S.moi]) R.places[S.moi].peerId = id;
-    diffuserSalle(); synchroniserMedia();
+    if (R.phase === "salle") diffuserSalle();
+    synchroniserMedia();
   } else if (R.role === "client" && R.lienHote) {
     R.lienHote.send({ t: "peer", peerId: id });
   }
@@ -1458,11 +1513,23 @@ function accepter(conn) {
   conn.on("data", (msg) => {
     if (!msg || typeof msg !== "object") return;
     if (msg.t === "hello") {
-      if (R.phase !== "salle") { conn.send({ t: "refus", raison: "Une partie est déjà en cours dans cette salle." }); setTimeout(() => conn.close(), 200); return; }
+      const nom = propre(msg.nom);
+      const jeton = typeof msg.jeton === "string" ? msg.jeton.slice(0, 40) : null;
+      const peerId = typeof msg.peerId === "string" ? msg.peerId.slice(0, 64) : null;
+      if (R.phase === "jeu") {
+        // un joueur parti peut reprendre sa place : même navigateur (jeton) ou même pseudo
+        const libres = [0, 1, 2, 3].filter((i) => R.absents[i] && S.sieges[i] === "bot");
+        let q = libres.find((i) => jeton && R.absents[i].jeton === jeton);
+        if (q === undefined) q = libres.find((i) => R.absents[i].nom.toLowerCase() === nom.toLowerCase());
+        if (q === undefined) { conn.send({ t: "refus", raison: "Une partie est déjà en cours dans cette salle. Seul un joueur parti peut y revenir." }); setTimeout(() => conn.close(), 200); return; }
+        reprendrePlace(conn, q, nom, jeton, peerId);
+        return;
+      }
+      if (R.phase !== "salle") { conn.send({ t: "refus", raison: "La salle n'est plus disponible." }); setTimeout(() => conn.close(), 200); return; }
       const q = ORDRE_PLACES.find((i) => !R.places[i]);
       if (q === undefined) { conn.send({ t: "refus", raison: "La salle est pleine." }); setTimeout(() => conn.close(), 200); return; }
       conn._siege = q;
-      R.places[q] = { nom: propre(msg.nom), lien: conn, peerId: typeof msg.peerId === "string" ? msg.peerId.slice(0, 64) : null };
+      R.places[q] = { nom, lien: conn, peerId, jeton };
       diffuserSalle(); afficherSalle(); synchroniserMedia();
       return;
     }
@@ -1472,7 +1539,8 @@ function accepter(conn) {
     else if (msg.t === "quitte") joueurParti(conn, true);
     else if (msg.t === "peer" && typeof msg.peerId === "string") {
       R.places[q].peerId = msg.peerId.slice(0, 64);
-      diffuserSalle(); synchroniserMedia();
+      if (R.phase === "salle") diffuserSalle(); // en partie, les identifiants partent avec l'état de jeu
+      synchroniserMedia();
     } else if (msg.t === "reponse") {
       const a = R.attentes.get(msg.id);
       if (a && a.p === q) { R.attentes.delete(msg.id); a.res(valider(a.kind, a.d, msg.valeur)); }
@@ -1484,14 +1552,27 @@ function accepter(conn) {
   conn.on("close", () => joueurParti(conn));
 }
 
+/* Un joueur parti revient : il reprend sa main et sa place, le bot s'efface. */
+function reprendrePlace(conn, q, nom, jeton, peerId) {
+  conn._siege = q;
+  R.places[q] = { nom, lien: conn, peerId, jeton };
+  delete R.absents[q];
+  S.sieges[q] = "distant"; R.nomsAbs[q] = nom; S.noms[q] = q === S.moi ? null : nom;
+  conn.send({ t: "debut" });
+  synchroniserMedia();
+  afficherAvis(`${nom} est revenu dans la partie.`);
+}
+
 function joueurParti(conn, volontaire) {
   const q = conn._siege;
   if (q === undefined || !R.places[q] || R.places[q].lien !== conn) return;
   const nomParti = R.places[q].nom;
+  const jetonParti = R.places[q].jeton || null;
   R.places[q] = null;
   if (R.phase === "salle") { diffuserSalle(); afficherSalle(); synchroniserMedia(); return; }
   // En pleine partie : un bot prend la place et décide à sa place.
   S.sieges[q] = "bot"; R.nomsAbs[q] = null; S.noms[q] = null;
+  R.absents[q] = { nom: nomParti, jeton: jetonParti };
   synchroniserMedia();
   afficherAvis(volontaire ? `${nomParti} a quitté la partie. Un bot prend sa place.` : `${nomParti} a été déconnecté. Un bot prend sa place.`);
   for (const [id, a] of [...R.attentes]) {
@@ -1514,7 +1595,7 @@ function lancerEnLigne() {
   jouerPartie();
 }
 function retourSalle() {
-  S.partieId++; R.phase = "salle";
+  S.partieId++; R.phase = "salle"; R.absents = {};
   S.sieges = ["local", "bot", "bot", "bot"];
   diffuserSalle(); afficherSalle();
 }
@@ -2027,7 +2108,8 @@ async function rejoindre(code, pseudo) {
   }
   R.lienHote = lien;
   if (!peer) creerPeerMedia();
-  lien.send({ t: "hello", nom: propre(pseudo), peerId: (R.peerMedia && R.peerMedia.id) || null });
+  lien.send({ t: "hello", nom: propre(pseudo), jeton: jetonJoueur(), peerId: (R.peerMedia && R.peerMedia.id) || null });
+  try { localStorage.setItem("belote-derniere-salle", JSON.stringify({ code, pseudo: propre(pseudo), ts: Date.now() })); } catch (e) { /* stockage indisponible */ }
   if (R.peerMedia && R.peerMedia.id) declarerPeerId(R.peerMedia.id);
   else if (R.peerMedia) R.peerMedia.on("open", (pid) => declarerPeerId(pid));
   R.minuteries.push(setInterval(() => {
@@ -2067,7 +2149,7 @@ function appliquerEtat(m) {
   S.moi = m.L; S.mode = m.mode; S.cible = m.cible; S.scores = m.scores; S.donneur = m.donneur;
   S.atout = m.atout; S.preneur = m.preneur; S.contrat = m.contrat; S.mult = m.mult; S.retournee = m.retournee;
   S.tour = m.tour; S.gagnant = m.gagnant; S.pli = m.pli; S.bulles = m.bulles; S.journal = m.journal;
-  S.enchereCourante = m.enchereCourante; S.toast = m.toast; S.noms = m.noms;
+  S.enchereCourante = m.enchereCourante; S.toast = m.toast; S.noms = m.noms; S.plisGagnes = m.plisGagnes || [0, 0, 0, 0];
   if (m.avis) { if (!S.avis || S.avis.txt !== m.avis) S.avis = { txt: m.avis, jusqua: Date.now() + 7000 }; } else S.avis = null;
   S.sieges = [0, 1, 2, 3].map((q) => (q === m.L ? "local" : "distant"));
   S.mains = m.mains.map((x) => (Array.isArray(x) ? x : new Array(x).fill(null)));
@@ -2111,7 +2193,7 @@ function quitterReseau() {
   setTimeout(() => liensDirects.forEach((l) => l.couper()), 300);
   R.clients = new Map();
   R.role = "solo"; R.phase = null; R.mqtt = null; R.rubrique = null; R.peerMedia = null; R.lienHote = null; R.code = null;
-  R.places = [null, null, null, null]; R.placesVues = [null, null, null, null];
+  R.places = [null, null, null, null]; R.placesVues = [null, null, null, null]; R.absents = {};
   R.attentes.clear(); R.fiches.clear(); R.peersVus = [null, null, null, null]; M.signature = "";
   S.moi = 0; S.sieges = ["local", "bot", "bot", "bot"]; S.noms = [null, null, null, null];
   S.avis = null;
@@ -2120,7 +2202,7 @@ function quitterReseau() {
 function quitterVolontaire() {
   if (R.role === "client" && R.lienHote) R.lienHote.send({ t: "quitte" });
   const attente = R.role === "client" ? 150 : 0; // laisse partir le message avant de couper
-  setTimeout(() => { quitterReseau(); R.message = null; menu(); }, attente);
+  setTimeout(() => { quitterReseau(); R.message = { txt: "Vous avez quitté la partie. Vous pouvez y revenir tant qu'elle est en cours.", erreur: false }; menu(); }, attente);
 }
 function confirmerQuitter() {
   if (R.role === "solo") return;
@@ -2159,7 +2241,12 @@ function menu() {
   if (R.role !== "solo") quitterReseau();
   S.partieId++; S.attenteCarte = null; arreterVoix();
   let pseudo = "";
+  let derniere = null;
   try { pseudo = localStorage.getItem("belote-pseudo") || ""; } catch (e) { /* stockage indisponible */ }
+  try {
+    const d = JSON.parse(localStorage.getItem("belote-derniere-salle") || "null");
+    if (d && /^[A-Z2-9]{5}$/.test(d.code) && Date.now() - d.ts < 3 * 3600 * 1000) derniere = d;
+  } catch (e) { /* stockage indisponible */ }
   const radio = (nom, val, lib, coche) => `<label><input type="radio" name="${nom}" value="${val}" ${coche ? "checked" : ""}> ${lib}</label>`;
   afficherFiche(`<h2>Belote</h2>
     <p style="margin:0;color:var(--muted)">Seul contre trois bots, ou de 2 à 4 joueurs en ligne.</p>
@@ -2190,6 +2277,7 @@ function menu() {
     <fieldset class="choix"><legend>Jouer en ligne (2 à 4 joueurs)</legend>
       <label for="pseudo" class="message">Votre pseudo</label>
       <input class="champ" id="pseudo" type="text" maxlength="16" autocomplete="nickname" value="${esc(pseudo)}" placeholder="Joueur">
+      ${derniere ? `<button class="btn or" id="revenir" type="button">Revenir dans la salle ${esc(derniere.code)}</button>` : ""}
       <button class="btn" id="creer" type="button">Créer une salle</button>
       <div class="ligne">
         <input class="champ" id="code" type="text" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Code de la salle" aria-label="Code de la salle">
@@ -2213,6 +2301,8 @@ function menu() {
     ecrireReglages();
   };
   $("#creer").addEventListener("click", () => { reglagesEnLigne(); ouvrirSalle(lirePseudo()); });
+  const revenir = $("#revenir");
+  if (revenir) revenir.addEventListener("click", () => { reglagesEnLigne(); rejoindre(derniere.code, lirePseudo() || derniere.pseudo); });
   $("#rejoindre").addEventListener("click", () => { reglagesEnLigne(); rejoindre($("#code").value, lirePseudo()); });
   if (R.message) messageReseau(R.message.txt, R.message.erreur);
   $("#jouer").focus();
