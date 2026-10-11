@@ -138,6 +138,19 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 .bilan { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .bilan th, .bilan td { padding: 6px 4px; text-align: right; border-bottom: 1px solid var(--line); }
 .bilan th:first-child, .bilan td:first-child { text-align: left; }
+.champ { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; min-width: 0; width: 100%; }
+.champ:focus-visible { outline: 3px solid var(--or); outline-offset: 1px; }
+.ligne { display: flex; gap: 8px; align-items: center; }
+.ligne .champ { flex: 1; }
+.message { margin: 0; font-size: 13px; color: var(--muted); min-height: 1.2em; }
+.message.erreur { color: var(--ko); }
+.code-salle { font: 700 30px/1 var(--font-titre); letter-spacing: 0.18em; text-align: center; padding: 10px; border: 1px dashed var(--line); border-radius: 12px; user-select: all; }
+.equipes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.equipes > div { display: grid; gap: 6px; align-content: start; }
+.equipes b { font-size: 13px; color: var(--muted); }
+.place { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; text-align: left; min-height: 38px; overflow-wrap: anywhere; }
+.place.moi { border-color: var(--or); box-shadow: inset 0 0 0 1px var(--or); font-weight: 600; }
+.place.libre { color: var(--muted); font-weight: 400; }
 .verdict { font-weight: 700; }
 .verdict.ok { color: var(--ok); } .verdict.ko { color: var(--ko); }
 .rouge { color: var(--rouge); }
@@ -186,6 +199,7 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 
 <div class="voile" id="voile" hidden><div class="fiche" id="fiche"></div></div>
 
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 "use strict";
 /* ===================== Moteur (port de belote.py) ===================== */
@@ -582,7 +596,15 @@ const S = {
   scores: [0, 0], donneur: 0, mains: [[], [], [], []], pli: [], vus: [], atout: null, preneur: null,
   contrat: null, mult: 1, retournee: null, tour: null, gagnant: null, bulles: {}, journal: [],
   partieId: 0, attenteCarte: null, enchereCourante: null, voix: "fr",
+  moi: 0, sieges: ["local", "bot", "bot", "bot"], noms: [null, null, null, null], pilote: null, sansDelai: false,
 };
+/* Perspective : S.moi est la place de ce navigateur ; sieges[q] vaut "local", "distant" (autre humain) ou "bot". */
+const rel = (q) => (q - S.moi + 4) % 4;
+const nom = (q) => S.noms[q] || ["Vous", "Ouest", "Partenaire", "Est"][rel(q)];
+const N = (q) => `§${q}§`; // marqueur de nom : résolu à l'affichage, chacun voit les noms de son point de vue
+const fmt = (s) => String(s).replace(/§(\d)§/g, (_, q) => nom(Number(q)));
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const propre = (s) => (String(s || "").replace(/[<>&"'`§]/g, "").trim().slice(0, 16) || "Joueur");
 const ANNULE = { annule: true };
 
 function carteHtml(c, extra) {
@@ -595,37 +617,38 @@ function log(msg) { S.journal.unshift(msg); if (S.journal.length > 10) S.journal
 
 function render() {
   if (S.auto) return;
-  $("#scores").innerHTML = `<span>Nous</span> <b>${S.scores[0]}</b> <span>Eux</span> <b>${S.scores[1]}</b> <span>objectif ${S.cible}</span>`;
-  for (let p = 0; p < 4; p++) {
-    const plaque = `<span class="plaque ${S.tour === p ? "actif" : ""}">${NOMS[p]}${S.donneur === p ? '<span class="donneur">Donneur</span>' : ""}</span>`;
-    const bulle = `<div class="bulle">${S.bulles[p] || ""}</div>`;
-    let corps;
-    if (p === 0) corps = plaque + bulle;
-    else corps = `${plaque}<span class="carte dos"><span class="nb">${S.mains[p].length}</span></span>${bulle}`;
-    $("#siege-" + p).innerHTML = corps;
+  const eq = S.moi % 2;
+  $("#scores").innerHTML = `<span>Nous</span> <b>${S.scores[eq]}</b> <span>Eux</span> <b>${S.scores[1 - eq]}</b> <span>objectif ${S.cible}</span>`;
+  for (let q = 0; q < 4; q++) {
+    const plaque = `<span class="plaque ${S.tour === q ? "actif" : ""}">${esc(nom(q))}${S.donneur === q ? '<span class="donneur">Donneur</span>' : ""}</span>`;
+    const bulle = `<div class="bulle">${S.bulles[q] || ""}</div>`;
+    const corps = q === S.moi ? plaque + bulle
+      : `${plaque}<span class="carte dos"><span class="nb">${S.mains[q].length}</span></span>${bulle}`;
+    $("#siege-" + rel(q)).innerHTML = corps;
   }
   // contrat (en haut à gauche de la table)
   let lignes = [];
   if (S.mode === "coinche" && S.enchereCourante && S.atout === null) {
     const e = S.enchereCourante;
-    lignes = [`<div class="titre">Enchère</div>`, `<div>${nomContrat(e.valeur)} ${symHtml(e.couleur)}</div>`, `<div>par ${NOMS[e.j]}</div>`];
+    lignes = [`<div class="titre">Enchère</div>`, `<div>${nomContrat(e.valeur)} ${symHtml(e.couleur)}</div>`, `<div>par ${esc(nom(e.j))}</div>`];
   } else if (S.atout) {
     lignes = [`<div class="titre">Atout ${symHtml(S.atout)}</div>`];
     if (S.contrat) lignes.push(`<div>Contrat ${nomContrat(S.contrat)}</div>`);
-    lignes.push(`<div>Preneur : ${NOMS[S.preneur]}</div>`);
+    lignes.push(`<div>Preneur : ${esc(nom(S.preneur))}</div>`);
     if (S.mult > 1) lignes.push(`<div class="note">${S.mult === 2 ? "Coinché ×2" : "Surcoinché ×4"}</div>`);
   } else if (S.retournee) {
     lignes = [`<div class="titre">Retournée</div>`, `<div>${carteHtml(S.retournee, "mini")}</div>`];
   }
   $("#contrat").innerHTML = lignes.join("");
-  $("#info").textContent = S.toast || "";
+  $("#info").textContent = S.toast ? fmt(S.toast) : "";
   let pli = "";
-  for (const x of S.pli) pli += `<div class="p${x.j} ${S.gagnant === x.j ? "gagnant" : ""}">${carteHtml(x.carte)}</div>`;
+  for (const x of S.pli) pli += `<div class="p${rel(x.j)} ${S.gagnant === x.j ? "gagnant" : ""}">${carteHtml(x.carte)}</div>`;
   if (!S.pli.length && S.retournee && S.atout === null) pli = `<div class="p0" style="grid-area:2/2">${carteHtml(S.retournee)}</div>`;
   $("#pli").innerHTML = pli;
   // main
-  const main = trierMain(S.mains[0], S.atout);
+  const main = trierMain(S.mains[S.moi], S.atout);
   const att = S.attenteCarte;
+  if (R.role === "hote") diffuserEtat();
   $("#main").innerHTML = main.map((c) => {
     const rouge = c.c === "Coeur" || c.c === "Carreau";
     const jouable = att && has(att.jouables, c);
@@ -634,7 +657,7 @@ function render() {
     return `<button type="button" class="${cls}" data-k="${k(c)}" aria-label="${label}" ${jouable ? "" : "disabled"}><span class="coin"><b>${ABREGE[c.v]}</b><i>${SYM[c.c]}</i></span><span class="gros">${SYM[c.c]}</span></button>`;
   }).join("");
 }
-function renderJournal() { if (!S.auto) $("#journal").innerHTML = S.journal.map((m) => `<li>${m}</li>`).join(""); }
+function renderJournal() { if (!S.auto) $("#journal").innerHTML = S.journal.map((m) => `<li>${esc(fmt(m))}</li>`).join(""); }
 
 $("#main").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-k]");
@@ -648,7 +671,7 @@ $("#main").addEventListener("click", (e) => {
 
 function pause(ms) {
   const id = S.partieId;
-  if (S.auto) return Promise.resolve();
+  if (S.auto || S.sansDelai) return Promise.resolve();
   return new Promise((res, rej) => setTimeout(() => (id === S.partieId ? res() : rej(ANNULE)), S.rapide ? ms / 2.5 : ms));
 }
 
@@ -677,7 +700,7 @@ const PHRASES = {
     surcoinche: () => hasard(["Surcoinche !", "Je surcoinche !"]),
     belote: () => "Belote !", rebelote: () => "Rebelote !",
     contrat: (c, p, v, mult) => {
-      const nom = NOMS_VOIX.fr[p];
+      const nom = NOMS_VOIX.fr[rel(p)];
       if (v === null) return `Atout ${c}, pris par ${nom}.`;
       const suite = mult === 4 ? ", surcoinché" : mult === 2 ? ", coinché" : "";
       return v === CAPOT ? `Contrat : capot à ${c}, par ${nom}${suite}.` : `Contrat : ${v} à ${c}, par ${nom}${suite}.`;
@@ -691,7 +714,7 @@ const PHRASES = {
     surcoinche: () => hasard(["Surcoinche!", "I surcoinche!"]),
     belote: () => "Belote!", rebelote: () => "Rebelote!",
     contrat: (c, p, v, mult) => {
-      const nom = NOMS_VOIX.en[p];
+      const nom = NOMS_VOIX.en[rel(p)];
       if (v === null) return `Trump is ${c}, taken by ${nom}.`;
       const suite = mult === 4 ? ", surcoinched" : mult === 2 ? ", coinched" : "";
       return v === CAPOT ? `Contract: capot in ${c}, by ${nom}${suite}.` : `Contract: ${v} in ${c}, by ${nom}${suite}.`;
@@ -705,7 +728,7 @@ const PHRASES = {
     surcoinche: () => hasard(["¡Sobrecoinche!", "¡Yo sobrecoincho!"]),
     belote: () => "¡Belote!", rebelote: () => "¡Rebelote!",
     contrat: (c, p, v, mult) => {
-      const nom = NOMS_VOIX.es[p];
+      const nom = NOMS_VOIX.es[rel(p)];
       if (v === null) return `Triunfo ${c}, lo toma ${nom}.`;
       const suite = mult === 4 ? ", sobrecoinchado" : mult === 2 ? ", coinchado" : "";
       return v === CAPOT ? `Contrato: capot en ${c}, de ${nom}${suite}.` : `Contrato: ${v} en ${c}, de ${nom}${suite}.`;
@@ -719,7 +742,7 @@ const PHRASES = {
     surcoinche: () => hasard(["シュルコアンシュ！", "シュルコアンシュです！"]),
     belote: () => "ベロット！", rebelote: () => "リベロット！",
     contrat: (c, p, v, mult) => {
-      const nom = NOMS_VOIX.ja[p];
+      const nom = NOMS_VOIX.ja[rel(p)];
       if (v === null) return `切り札は${c}、${nom}が取りました。`;
       const suite = mult === 4 ? "、シュルコアンシュ" : mult === 2 ? "、コアンシュ" : "";
       return v === CAPOT ? `契約は${c}でカポ、${nom}${suite}。` : `契約は${c}で${v}、${nom}${suite}。`;
@@ -772,10 +795,18 @@ function dire(texte, p) {
 }
 function silence(ms) {
   const id = S.partieId;
+  if (S.sansDelai) return Promise.resolve();
   return new Promise((res, rej) => setTimeout(() => (id === S.partieId ? res() : rej(ANNULE)), ms));
+}
+/* Voix reçue d'un autre navigateur (jeu en ligne) : on parle sans attendre. */
+function parlerLocal(p, type, args) {
+  if (S.voix === "off") return;
+  const noms = COULEUR_VOIX[S.voix];
+  dire(PHRASES[S.voix][type](...args.map((a) => (typeof a === "string" && noms[a] ? noms[a] : a))), p);
 }
 /* Fait parler le joueur p, puis laisse 2 secondes de silence. Renvoie false si la voix est coupée. */
 async function annoncer(p, type, ...args) {
+  if (R.role === "hote") diffuser({ t: "voix", p, type, args });
   if (S.auto || S.voix === "off") return false;
   const noms = COULEUR_VOIX[S.voix];
   const texte = PHRASES[S.voix][type](...args.map((a) => (typeof a === "string" && noms[a] ? noms[a] : a)));
@@ -859,7 +890,48 @@ function humainCarte(jouables) {
 }
 
 /* ---- Déroulement d'une donne ---- */
-const estHumain = (p) => p === 0 && !S.auto;
+const estHumain = (p) => S.sieges[p] !== "bot" && !S.auto;
+
+/* Réponse d'un joueur humain de ce navigateur. */
+function reponseLocale(kind, d) {
+  if (S.pilote) return Promise.resolve(S.pilote[kind](d));
+  switch (kind) {
+    case "prise": return humainPrise(d.retournee, d.tour);
+    case "enchere": return humainEnchere(d.courant);
+    case "coinche": return humainOuiNon(`${nom(d.preneur)} a pris ${nomContrat(d.valeur)} ${SYM[d.couleur]}. Coincher ?`, "Coincher (×2)", "Laisser");
+    case "surcoinche": return humainOuiNon("Vous êtes coinchés. Surcoincher ?", "Surcoincher (×4)", "Laisser");
+    case "carte": return humainCarte(d.jouables);
+  }
+}
+/* Décision d'un bot : sert aussi quand un joueur en ligne quitte la partie. */
+function reponseBot(p, kind, d) {
+  const b = bots[p], main = S.mains[p];
+  switch (kind) {
+    case "prise": return b.prise(main, d.retournee, d.tour);
+    case "enchere": return b.enchere(main, d.courant, p);
+    case "coinche": return b.coinche(main, { valeur: d.valeur, couleur: d.couleur, j: d.preneur });
+    case "surcoinche": return b.surcoinche(main, { valeur: d.valeur, couleur: d.couleur, j: d.preneur });
+    case "carte": return b.choisirCarte(main, d.jouables, S.pli.slice(), S.atout, S.vus.slice());
+  }
+}
+function valider(kind, d, v) {
+  switch (kind) {
+    case "prise": return v === null || (d.tour === 1 ? v === d.retournee.c : COULEURS.includes(v) && v !== d.retournee.c) ? v : null;
+    case "enchere": return v && ENCHERES.includes(v.valeur) && COULEURS.includes(v.couleur) ? { valeur: v.valeur, couleur: v.couleur } : null;
+    case "carte": return d.jouables.find((c) => v && k(c) === k(v)) || d.jouables[0];
+    default: return !!v;
+  }
+}
+/* Demande une décision au joueur p, qu'il soit ici, sur un autre navigateur ou remplacé par un bot. */
+function demander(p, kind, d) {
+  if (S.sieges[p] === "local") return reponseLocale(kind, d);
+  if (S.sieges[p] === "bot") return Promise.resolve(reponseBot(p, kind, d));
+  return new Promise((res) => {
+    const id = ++R.idDemande;
+    R.attentes.set(id, { p, kind, d, res });
+    envoyer(p, { t: "demande", id, kind, data: d });
+  });
+}
 let bots = [];
 
 async function encheresBelote(mains, retournee, donneur) {
@@ -869,16 +941,16 @@ async function encheresBelote(mains, retournee, donneur) {
       const p = apres(donneur, 1 + kk);
       S.tour = p; render();
       let choix;
-      if (estHumain(p)) choix = await humainPrise(retournee, tour);
+      if (estHumain(p)) choix = await demander(p, "prise", { retournee, tour });
       else { await reflechir(); choix = bots[p].prise(mains[p], retournee, tour); }
       if (choix) {
         S.bulles[p] = `Prend à ${symHtml(choix)}`;
-        log(`${NOMS[p]} prend à ${SYM[choix]} ${NOM_COULEUR[choix]}.`);
+        log(`${N(p)} prend à ${SYM[choix]} ${NOM_COULEUR[choix]}.`);
         S.tour = null; render();
         if (!(await annoncer(p, "prend", choix))) await pause(900);
         return { preneur: p, atout: choix };
       }
-      S.bulles[p] = "Passe"; log(`${NOMS[p]} passe.`); render();
+      S.bulles[p] = "Passe"; log(`${N(p)} passe.`); render();
       await annoncer(p, "passe");
     }
   }
@@ -891,16 +963,16 @@ async function encheresCoinche(mains, donneur) {
     const p = apres(donneur, 1 + kk); kk++;
     S.tour = p; render();
     let choix;
-    if (estHumain(p)) choix = await humainEnchere(courant);
+    if (estHumain(p)) choix = await demander(p, "enchere", { courant });
     else { await reflechir(); choix = bots[p].enchere(mains[p], courant, p); }
     let parole;
     if (choix && (courant === null || choix.valeur > courant.valeur) && ENCHERES.includes(choix.valeur)) {
       courant = { valeur: choix.valeur, couleur: choix.couleur, j: p };
       S.enchereCourante = courant; passes = 0;
       S.bulles[p] = `${nomContrat(choix.valeur)} ${symHtml(choix.couleur)}`;
-      log(`${NOMS[p]} annonce ${nomContrat(choix.valeur)} ${SYM[choix.couleur]}.`);
+      log(`${N(p)} annonce ${nomContrat(choix.valeur)} ${SYM[choix.couleur]}.`);
       parole = ["enchere", choix.valeur, choix.couleur];
-    } else { passes++; S.bulles[p] = "Passe"; log(`${NOMS[p]} passe.`); parole = ["passe"]; }
+    } else { passes++; S.bulles[p] = "Passe"; log(`${N(p)} passe.`); parole = ["passe"]; }
     render();
     await annoncer(p, ...parole);
     if (courant === null && passes === 4) return null;
@@ -912,16 +984,16 @@ async function encheresCoinche(mains, donneur) {
   for (const adv of [apres(preneur, 1), apres(preneur, 3)]) {
     S.tour = adv; render();
     let coinche;
-    if (estHumain(adv)) coinche = await humainOuiNon(`${NOMS[preneur]} a pris ${nomContrat(courant.valeur)} ${SYM[courant.couleur]}. Coincher ?`, "Coincher (×2)", "Laisser");
+    if (estHumain(adv)) coinche = await demander(adv, "coinche", { preneur, valeur: courant.valeur, couleur: courant.couleur });
     else { await reflechir(); coinche = bots[adv].coinche(mains[adv], courant); }
     if (coinche) {
-      mult = 2; S.bulles[adv] = "Coinche !"; log(`${NOMS[adv]} coinche !`); render();
+      mult = 2; S.bulles[adv] = "Coinche !"; log(`${N(adv)} coinche !`); render();
       await annoncer(adv, "coinche");
       let sur;
       S.tour = preneur; render();
-      if (estHumain(preneur)) sur = await humainOuiNon("Vous êtes coinchés. Surcoincher ?", "Surcoincher (×4)", "Laisser");
+      if (estHumain(preneur)) sur = await demander(preneur, "surcoinche", { preneur, valeur: courant.valeur, couleur: courant.couleur });
       else { await reflechir(); sur = bots[preneur].surcoinche(mains[preneur], courant); }
-      if (sur) { mult = 4; S.bulles[preneur] = "Surcoinche !"; log(`${NOMS[preneur]} surcoinche !`); render(); await annoncer(preneur, "surcoinche"); }
+      if (sur) { mult = 4; S.bulles[preneur] = "Surcoinche !"; log(`${N(preneur)} surcoinche !`); render(); await annoncer(preneur, "surcoinche"); }
       break;
     }
   }
@@ -936,14 +1008,14 @@ async function jouerDonne(donneur) {
 
   if (S.mode === "coinche") {
     mains = [0, 1, 2, 3].map((i) => jeu.slice(i * 8, i * 8 + 8));
-    S.mains = mains; log(`Nouvelle donne. Donneur : ${NOMS[donneur]}.`); render(); await pause(500);
+    S.mains = mains; log(`Nouvelle donne. Donneur : ${N(donneur)}.`); render(); await pause(500);
     const r = await encheresCoinche(mains, donneur);
     if (!r) { log("Personne n'enchérit : on redistribue."); S.bulles = {}; render(); await pause(1200); return null; }
     ({ preneur, atout, valeur: contrat, mult } = r);
   } else {
     mains = [0, 1, 2, 3].map((i) => jeu.slice(i * 5, i * 5 + 5));
     const retournee = jeu[20], reste = jeu.slice(21);
-    S.mains = mains; S.retournee = retournee; log(`Nouvelle donne. Donneur : ${NOMS[donneur]}.`); render(); await pause(500);
+    S.mains = mains; S.retournee = retournee; log(`Nouvelle donne. Donneur : ${N(donneur)}.`); render(); await pause(500);
     const r = await encheresBelote(mains, retournee, donneur);
     if (!r) { log("Personne ne prend : on redistribue."); S.retournee = null; S.bulles = {}; render(); await pause(1200); return null; }
     ({ preneur, atout } = r);
@@ -955,7 +1027,7 @@ async function jouerDonne(donneur) {
   Object.assign(S, { atout, preneur, contrat, mult, bulles: {}, tour: null });
   render();
   if (!(await annoncer(donneur, "contrat", atout, preneur, contrat, mult))) await pause(300);
-  bots.forEach((b, p) => b && b.debutDonne(p, atout, preneur));
+  bots.forEach((b, p) => b.debutDonne(p, atout, preneur));
   render(); await pause(600);
 
   const beloteJoueur = [0, 1, 2, 3].find((p) => has(mains[p], { v: "Roi", c: atout }) && has(mains[p], { v: "Dame", c: atout }));
@@ -972,7 +1044,7 @@ async function jouerDonne(donneur) {
       S.tour = p; render();
       let carte;
       if (estHumain(p)) {
-        carte = jouables.length === 1 && false ? jouables[0] : await humainCarte(jouables);
+        carte = await demander(p, "carte", { jouables });
       } else {
         await pause(650);
         carte = bots[p].choisirCarte(mains[p], jouables, S.pli.slice(), atout, S.vus.slice());
@@ -982,7 +1054,7 @@ async function jouerDonne(donneur) {
       if (p === beloteJoueur && ((carte.v === "Roi" || carte.v === "Dame") && carte.c === atout)) {
         beloteJouees++;
         const t = beloteJouees === 1 ? "Belote !" : "Rebelote !";
-        log(`${NOMS[p]} : ${t}`); S.toast = `${NOMS[p]} : ${t}`; setTimeout(() => { S.toast = null; render(); }, 1600);
+        log(`${N(p)} : ${t}`); S.toast = `${N(p)} : ${t}`; setTimeout(() => { S.toast = null; render(); }, 1600);
         render();
         await annoncer(p, beloteJouees === 1 ? "belote" : "rebelote");
       }
@@ -992,7 +1064,7 @@ async function jouerDonne(donneur) {
     const gain = S.pli.reduce((s, x) => s + pts(x.carte, atout), 0) + (numero === 7 ? DIX_DE_DER : 0);
     cartes[gagnant % 2] += gain; plis[gagnant % 2]++;
     S.gagnant = gagnant; render();
-    log(`Pli ${numero + 1} : ${NOMS[gagnant]} (+${gain})`);
+    log(`Pli ${numero + 1} : ${N(gagnant)} (+${gain})`);
     await pause(1300);
     S.vus.push(...S.pli);
     meneur = gagnant;
@@ -1006,6 +1078,7 @@ function afficherFiche(html) { $("#fiche").innerHTML = html; $("#voile").hidden 
 function cacherFiche() { $("#voile").hidden = true; }
 function attendreFiche(html, idBouton) {
   const id = S.partieId;
+  if (S.pilote) { afficherFiche(html); return Promise.resolve(); }
   return new Promise((res) => {
     afficherFiche(html);
     $("#" + idBouton).addEventListener("click", () => { cacherFiche(); if (id === S.partieId) res(); }, { once: true });
@@ -1014,22 +1087,48 @@ function attendreFiche(html, idBouton) {
 }
 
 function bilanHtml(r) {
+  const nous = S.moi % 2, eux = 1 - nous;
+  const equipe = (e) => (e === nous ? "Nous" : "Eux");
   const eq = r.preneur % 2;
-  const nomEq = (e) => (e === 0 ? "Nous" : "Eux");
-  const ligneBelote = r.belote !== null ? `<tr><td>Belote-rebelote</td><td>${r.belote === 0 ? "+20" : ""}</td><td>${r.belote === 1 ? "+20" : ""}</td></tr>` : "";
+  const ligneBelote = r.belote !== null ? `<tr><td>Belote-rebelote</td><td>${r.belote === nous ? "+20" : ""}</td><td>${r.belote === eux ? "+20" : ""}</td></tr>` : "";
   const contratTxt = r.contrat === null ? `Atout ${symHtml(r.atout)}` : `Contrat ${nomContrat(r.contrat)} ${symHtml(r.atout)}${r.mult > 1 ? ` ×${r.mult}` : ""}`;
-  const nous = r.preneur % 2 === 0;
+  const pour = eq === nous;
   const verdict = r.rempli
-    ? `<span class="verdict ${nous ? "ok" : "ko"}">Contrat rempli par ${nomEq(eq)}</span>`
-    : `<span class="verdict ${nous ? "ko" : "ok"}">Chute de ${nomEq(eq)}</span>`;
+    ? `<span class="verdict ${pour ? "ok" : "ko"}">Contrat rempli par ${equipe(eq)}</span>`
+    : `<span class="verdict ${pour ? "ko" : "ok"}">Chute de ${equipe(eq)}</span>`;
   return `<h2>Fin de la donne</h2>
-    <div>${contratTxt}, pris par ${NOMS[r.preneur]}. ${verdict}.</div>
+    <div>${contratTxt}, pris par ${esc(nom(r.preneur))}. ${verdict}.</div>
     <table class="bilan"><thead><tr><th></th><th>Nous</th><th>Eux</th></tr></thead><tbody>
-      <tr><td>Plis gagnés</td><td>${r.plis[0]}</td><td>${r.plis[1]}</td></tr>
-      <tr><td>Points des cartes (dix de der compris)</td><td>${r.cartes[0]}</td><td>${r.cartes[1]}</td></tr>
+      <tr><td>Plis gagnés</td><td>${r.plis[nous]}</td><td>${r.plis[eux]}</td></tr>
+      <tr><td>Points des cartes (dix de der compris)</td><td>${r.cartes[nous]}</td><td>${r.cartes[eux]}</td></tr>
       ${ligneBelote}
-      <tr><td><b>Marqué</b></td><td><b>${r.marque[0]}</b></td><td><b>${r.marque[1]}</b></td></tr>
+      <tr><td><b>Marqué</b></td><td><b>${r.marque[nous]}</b></td><td><b>${r.marque[eux]}</b></td></tr>
     </tbody></table>`;
+}
+function ficheBilan(r, fin) {
+  return bilanHtml(r) + `<button class="btn or" id="suite" type="button">${fin ? "Voir le résultat" : "Donne suivante"}</button>`;
+}
+function ficheFin(scores) {
+  const nous = S.moi % 2, eux = 1 - nous;
+  const egal = scores[nous] === scores[eux];
+  const gagne = scores[nous] > scores[eux];
+  const bouton = R.role === "solo" ? "Nouvelle partie" : "Retour à la salle";
+  return `<h2>${egal ? "Égalité" : gagne ? "Victoire !" : "Défaite"}</h2>
+    <div>Nous <b>${scores[nous]}</b> · Eux <b>${scores[eux]}</b></div>
+    <button class="btn or" id="suite" type="button">${bouton}</button>`;
+}
+
+/* Affiche une fiche sur tous les écrans humains et attend que chacun clique. */
+async function ficheTous(kind, data) {
+  const id = ++R.idFiche;
+  const attentes = [];
+  for (let q = 0; q < 4; q++) {
+    if (S.sieges[q] !== "distant") continue;
+    attentes.push(new Promise((res) => R.fiches.set(`${id}:${q}`, res)));
+    envoyer(q, { t: "fiche", id, kind, data });
+  }
+  const html = kind === "bilan" ? ficheBilan(data.r, data.fin) : ficheFin(data.scores);
+  await Promise.all([attendreFiche(html, "suite"), ...attentes]);
 }
 
 async function jouerPartie() {
@@ -1038,7 +1137,7 @@ async function jouerPartie() {
   S.scores = [0, 0]; S.journal = []; S.attenteCarte = null; S.mains = [[], [], [], []];
   $("#action").innerHTML = ""; renderJournal();
   const Cls = { expert: BotExpert, malin: BotMalin, simple: Bot }[S.niveau] || BotExpert;
-  bots = [null, new Cls(), new Cls(), new Cls()];
+  bots = [0, 1, 2, 3].map(() => new Cls());
   let donneur = Math.floor(Math.random() * 4);
   try {
     while (Math.max(...S.scores) < S.cible) {
@@ -1047,15 +1146,265 @@ async function jouerPartie() {
       if (!r) continue;
       S.scores[0] += r.marque[0]; S.scores[1] += r.marque[1]; render();
       const fin = Math.max(...S.scores) >= S.cible;
-      await attendreFiche(bilanHtml(r) + `<button class="btn or" id="suite" type="button">${fin ? "Voir le résultat" : "Donne suivante"}</button>`, "suite");
+      await ficheTous("bilan", { r, fin });
     }
-    const gagne = S.scores[0] > S.scores[1];
-    const egal = S.scores[0] === S.scores[1];
-    await attendreFiche(`<h2>${egal ? "Égalité" : gagne ? "Victoire !" : "Défaite"}</h2>
-      <div>Nous <b>${S.scores[0]}</b> · Eux <b>${S.scores[1]}</b></div>
-      <button class="btn or" id="rejouer" type="button">Nouvelle partie</button>`, "rejouer");
-    menu();
+    await ficheTous("fin", { scores: S.scores.slice() });
+    if (R.role === "hote") retourSalle(); else menu();
   } catch (e) { if (e !== ANNULE) throw e; }
+}
+
+/* ===================== Jeu en ligne (pair à pair, 2 à 4 joueurs) ===================== */
+/* L'hôte fait tourner la partie ; les autres navigateurs reçoivent leur vue (leur main seulement)
+   et renvoient leurs choix. Les places non occupées sont tenues par des bots. */
+const ICE = { iceServers: [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443"], username: "openrelayproject", credential: "openrelayproject" },
+] };
+const R = {
+  role: "solo",          // "solo" | "hote" | "client"
+  phase: null,           // "salle" | "jeu"
+  usine: (id) => (id ? new Peer(id, { config: ICE }) : new Peer({ config: ICE })),
+  peer: null, code: null,
+  places: [null, null, null, null],   // hôte : { nom, lien } par siège ; lien null = l'hôte lui-même
+  placesVues: [null, null, null, null], // client : { nom } par siège
+  lienHote: null,                     // client : connexion vers l'hôte
+  attentes: new Map(), fiches: new Map(), idDemande: 0, idFiche: 0,
+  nomsAbs: [null, null, null, null], message: null,
+};
+const ORDRE_PLACES = [0, 2, 1, 3]; // le 2e joueur devient le partenaire de l'hôte
+
+function envoyer(q, msg) { try { const l = R.places[q] && R.places[q].lien; if (l && l.open) l.send(msg); } catch (e) { /* lien fermé */ } }
+function diffuser(msg) { for (let q = 0; q < 4; q++) envoyer(q, msg); }
+
+function diffuserEtat() {
+  if (R.phase !== "jeu") return;
+  for (let q = 0; q < 4; q++) {
+    if (S.sieges[q] !== "distant") continue;
+    envoyer(q, {
+      t: "etat", L: q, mode: S.mode, cible: S.cible, scores: S.scores, donneur: S.donneur, atout: S.atout,
+      preneur: S.preneur, contrat: S.contrat, mult: S.mult, retournee: S.retournee, tour: S.tour, gagnant: S.gagnant,
+      pli: S.pli, bulles: S.bulles, journal: S.journal, enchereCourante: S.enchereCourante, toast: S.toast,
+      noms: R.nomsAbs.map((n, i) => (i === q ? null : n)),
+      mains: S.mains.map((m, i) => (i === q ? m : m.length)),
+    });
+  }
+}
+
+/* ---- Salle d'attente ---- */
+function nbHumains() { return R.places.filter(Boolean).length; }
+
+function diffuserSalle() {
+  for (let q = 0; q < 4; q++) {
+    envoyer(q, { t: "salle", code: R.code, moi: q, places: R.places.map((p) => p && { nom: p.nom }) });
+  }
+}
+
+function afficherSalle() {
+  const hote = R.role === "hote";
+  const places = hote ? R.places : R.placesVues;
+  const place = (q) => {
+    const p = places[q];
+    if (p) return `<div class="place ${q === S.moi ? "moi" : ""}">${esc(p.nom)}${q === S.moi ? " (vous)" : ""}</div>`;
+    return `<button type="button" class="btn place libre" data-q="${q}">Bot · s'asseoir ici</button>`;
+  };
+  const n = places.filter(Boolean).length;
+  afficherFiche(`<h2>Salle en ligne</h2>
+    <p class="message">Donnez ce code aux autres joueurs, ils le saisissent dans « Rejoindre ».</p>
+    <div class="code-salle" aria-label="Code de la salle">${esc(R.code || "")}</div>
+    <p class="message">Les deux places d'une même équipe sont face à face. Les places libres sont jouées par des bots.</p>
+    <div class="equipes">
+      <div><b>Équipe A</b>${place(0)}${place(2)}</div>
+      <div><b>Équipe B</b>${place(1)}${place(3)}</div>
+    </div>
+    ${hote
+      ? `<button class="btn or" id="lancer" type="button" ${n < 2 ? "disabled" : ""}>${n < 2 ? "En attente d'un autre joueur…" : `Lancer la partie (${n} joueurs)`}</button>`
+      : `<p class="message">En attente du lancement par l'hôte…</p>`}
+    <button class="btn" id="quitter" type="button">Quitter la salle</button>`);
+  document.querySelectorAll("#fiche button[data-q]").forEach((b) => b.addEventListener("click", () => demanderPlace(Number(b.dataset.q))));
+  const lancer = $("#lancer");
+  if (lancer) lancer.addEventListener("click", lancerEnLigne);
+  $("#quitter").addEventListener("click", () => { quitterReseau(); menu(); });
+}
+
+function demanderPlace(q) {
+  if (R.role === "hote") deplacer(S.moi, q);
+  else try { R.lienHote.send({ t: "siege", q }); } catch (e) { /* hors ligne */ }
+}
+function deplacer(de, q) {
+  if (R.phase !== "salle" || R.places[q] || !R.places[de]) return;
+  R.places[q] = R.places[de]; R.places[de] = null;
+  if (R.places[q].lien) R.places[q].lien._siege = q; else S.moi = q;
+  diffuserSalle(); afficherSalle();
+}
+
+function ouvrirSalle(pseudo) {
+  if (typeof Peer === "undefined") return messageReseau("Le jeu en ligne n'est pas disponible : la bibliothèque réseau n'a pas pu être chargée.", true);
+  quitterReseau();
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const tirer = () => Array.from({ length: 5 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
+  messageReseau("Création de la salle…");
+  const essayer = (n) => {
+    const code = tirer();
+    let peer;
+    try { peer = R.usine("belote-" + code); } catch (e) { return messageReseau("Connexion réseau impossible.", true); }
+    peer.on("open", () => {
+      R.role = "hote"; R.phase = "salle"; R.peer = peer; R.code = code;
+      R.places = [{ nom: propre(pseudo), lien: null }, null, null, null];
+      S.moi = 0; afficherSalle();
+    });
+    peer.on("connection", (conn) => accepter(conn));
+    peer.on("error", (e) => {
+      if (e.type === "unavailable-id" && n < 5) return essayer(n + 1);
+      if (R.role === "hote") return;
+      messageReseau("Impossible de créer la salle (" + (e.type || "erreur réseau") + ").", true);
+    });
+  };
+  essayer(0);
+}
+
+function accepter(conn) {
+  conn.on("data", (msg) => {
+    if (!msg || typeof msg !== "object") return;
+    if (msg.t === "hello") {
+      if (R.phase !== "salle") { conn.send({ t: "refus", raison: "Une partie est déjà en cours dans cette salle." }); setTimeout(() => conn.close(), 200); return; }
+      const q = ORDRE_PLACES.find((i) => !R.places[i]);
+      if (q === undefined) { conn.send({ t: "refus", raison: "La salle est pleine." }); setTimeout(() => conn.close(), 200); return; }
+      conn._siege = q;
+      R.places[q] = { nom: propre(msg.nom), lien: conn };
+      diffuserSalle(); afficherSalle();
+      return;
+    }
+    const q = conn._siege;
+    if (q === undefined || !R.places[q] || R.places[q].lien !== conn) return;
+    if (msg.t === "siege" && Number.isInteger(msg.q) && msg.q >= 0 && msg.q < 4) deplacer(q, msg.q);
+    else if (msg.t === "reponse") {
+      const a = R.attentes.get(msg.id);
+      if (a && a.p === q) { R.attentes.delete(msg.id); a.res(valider(a.kind, a.d, msg.valeur)); }
+    } else if (msg.t === "pret") {
+      const r = R.fiches.get(`${msg.id}:${q}`);
+      if (r) { R.fiches.delete(`${msg.id}:${q}`); r(); }
+    }
+  });
+  conn.on("close", () => joueurParti(conn));
+  conn.on("error", () => joueurParti(conn));
+}
+
+function joueurParti(conn) {
+  const q = conn._siege;
+  if (q === undefined || !R.places[q] || R.places[q].lien !== conn) return;
+  const nomParti = R.places[q].nom;
+  R.places[q] = null;
+  if (R.phase === "salle") { diffuserSalle(); afficherSalle(); return; }
+  // En pleine partie : un bot prend la place et décide à sa place.
+  S.sieges[q] = "bot"; R.nomsAbs[q] = null; S.noms[q] = null;
+  log(`${esc(nomParti)} a quitté la partie : un bot le remplace.`);
+  for (const [id, a] of [...R.attentes]) {
+    if (a.p === q) { R.attentes.delete(id); a.res(reponseBot(q, a.kind, a.d)); }
+  }
+  for (const [cle, res] of [...R.fiches]) {
+    if (cle.endsWith(":" + q)) { R.fiches.delete(cle); res(); }
+  }
+  render();
+}
+
+function lancerEnLigne() {
+  if (R.role !== "hote" || nbHumains() < 2) return;
+  R.phase = "jeu";
+  S.sieges = R.places.map((p, q) => (!p ? "bot" : p.lien ? "distant" : "local"));
+  R.nomsAbs = R.places.map((p) => (p ? p.nom : null));
+  S.noms = R.nomsAbs.map((n, q) => (q === S.moi ? null : n));
+  diffuser({ t: "debut" });
+  cacherFiche();
+  jouerPartie();
+}
+function retourSalle() {
+  S.partieId++; R.phase = "salle";
+  S.sieges = ["local", "bot", "bot", "bot"];
+  diffuserSalle(); afficherSalle();
+}
+
+/* ---- Client ---- */
+function rejoindre(code, pseudo) {
+  if (typeof Peer === "undefined") return messageReseau("Le jeu en ligne n'est pas disponible : la bibliothèque réseau n'a pas pu être chargée.", true);
+  code = String(code || "").trim().toUpperCase();
+  if (!/^[A-Z2-9]{5}$/.test(code)) return messageReseau("Le code de la salle comporte 5 caractères.", true);
+  quitterReseau();
+  messageReseau("Connexion à la salle…");
+  let peer;
+  try { peer = R.usine(null); } catch (e) { return messageReseau("Connexion réseau impossible.", true); }
+  R.peer = peer;
+  const delai = setTimeout(() => { if (R.role !== "client") { quitterReseau(); messageReseau("La salle ne répond pas. Vérifiez le code et réessayez.", true); } }, 15000);
+  peer.on("open", () => {
+    const conn = peer.connect("belote-" + code, { reliable: true, serialization: "json" });
+    conn.on("open", () => {
+      clearTimeout(delai);
+      R.role = "client"; R.lienHote = conn; R.code = code;
+      conn.send({ t: "hello", nom: propre(pseudo) });
+    });
+    conn.on("data", traiterMessageClient);
+    conn.on("close", () => { if (R.role === "client") { quitterReseau(); menu(); messageReseau("La connexion avec l'hôte est perdue.", true); } });
+  });
+  peer.on("error", (e) => {
+    clearTimeout(delai);
+    if (R.role === "client") return;
+    quitterReseau();
+    messageReseau(e.type === "peer-unavailable" ? "Salle introuvable : vérifiez le code." : "Connexion impossible (" + (e.type || "erreur réseau") + ").", true);
+  });
+}
+
+function traiterMessageClient(msg) {
+  if (!msg || typeof msg !== "object") return;
+  switch (msg.t) {
+    case "salle":
+      R.phase = "salle"; R.placesVues = msg.places; R.code = msg.code; S.moi = msg.moi;
+      afficherSalle();
+      break;
+    case "debut":
+      R.phase = "jeu"; S.partieId++; S.journal = []; S.attenteCarte = null; cacherFiche();
+      break;
+    case "etat": appliquerEtat(msg); break;
+    case "demande": traiterDemande(msg); break;
+    case "fiche": traiterFiche(msg); break;
+    case "voix": parlerLocal(msg.p, msg.type, msg.args || []); break;
+    case "refus": quitterReseau(); menu(); messageReseau(msg.raison || "Salle indisponible.", true); break;
+    case "ferme": quitterReseau(); menu(); messageReseau("L'hôte a fermé la salle.", true); break;
+  }
+}
+function appliquerEtat(m) {
+  S.moi = m.L; S.mode = m.mode; S.cible = m.cible; S.scores = m.scores; S.donneur = m.donneur;
+  S.atout = m.atout; S.preneur = m.preneur; S.contrat = m.contrat; S.mult = m.mult; S.retournee = m.retournee;
+  S.tour = m.tour; S.gagnant = m.gagnant; S.pli = m.pli; S.bulles = m.bulles; S.journal = m.journal;
+  S.enchereCourante = m.enchereCourante; S.toast = m.toast; S.noms = m.noms;
+  S.sieges = [0, 1, 2, 3].map((q) => (q === m.L ? "local" : "distant"));
+  S.mains = m.mains.map((x) => (Array.isArray(x) ? x : new Array(x).fill(null)));
+  render(); renderJournal();
+}
+async function traiterDemande(msg) {
+  const rep = await reponseLocale(msg.kind, msg.data);
+  try { R.lienHote.send({ t: "reponse", id: msg.id, valeur: rep === undefined ? null : rep }); } catch (e) { /* hors ligne */ }
+}
+async function traiterFiche(msg) {
+  const html = msg.kind === "bilan" ? ficheBilan(msg.data.r, msg.data.fin) : ficheFin(msg.data.scores);
+  await attendreFiche(html, "suite");
+  try { R.lienHote.send({ t: "pret", id: msg.id }); } catch (e) { /* hors ligne */ }
+}
+
+function quitterReseau() {
+  try {
+    if (R.role === "hote") diffuser({ t: "ferme" });
+    for (const p of R.places) if (p && p.lien) try { p.lien.close(); } catch (e) { /* déjà fermé */ }
+    if (R.lienHote) try { R.lienHote.close(); } catch (e) { /* déjà fermé */ }
+    if (R.peer) R.peer.destroy();
+  } catch (e) { /* réseau déjà coupé */ }
+  R.role = "solo"; R.phase = null; R.peer = null; R.lienHote = null; R.code = null;
+  R.places = [null, null, null, null]; R.placesVues = [null, null, null, null];
+  R.attentes.clear(); R.fiches.clear();
+  S.moi = 0; S.sieges = ["local", "bot", "bot", "bot"]; S.noms = [null, null, null, null];
+}
+function messageReseau(txt, erreur) {
+  R.message = { txt, erreur: !!erreur };
+  const el = document.querySelector("#msg-reseau");
+  if (el) { el.textContent = txt; el.className = "message" + (erreur ? " erreur" : ""); }
 }
 
 function lireReglages() {
@@ -1068,10 +1417,13 @@ function ecrireReglages() {
 function arreterVoix() { try { window.speechSynthesis.cancel(); } catch (e) { /* pas de synthèse vocale */ } }
 
 function menu() {
+  if (R.role !== "solo") quitterReseau();
   S.partieId++; S.attenteCarte = null; arreterVoix();
+  let pseudo = "";
+  try { pseudo = localStorage.getItem("belote-pseudo") || ""; } catch (e) { /* stockage indisponible */ }
   const radio = (nom, val, lib, coche) => `<label><input type="radio" name="${nom}" value="${val}" ${coche ? "checked" : ""}> ${lib}</label>`;
   afficherFiche(`<h2>Belote</h2>
-    <p style="margin:0;color:var(--muted)">Vous et Partenaire contre Ouest et Est.</p>
+    <p style="margin:0;color:var(--muted)">Seul contre trois bots, ou de 2 à 4 joueurs en ligne.</p>
     <fieldset class="choix"><legend>Mode</legend>
       ${radio("mode", "belote", "Belote contrat", S.mode === "belote")}
       ${radio("mode", "coinche", "Coinche (enchères au point)", S.mode === "coinche")}
@@ -1095,16 +1447,39 @@ function menu() {
       </div>
     </fieldset>
     <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="rapide" ${S.rapide ? "checked" : ""}> Rythme rapide</label>
-    <button class="btn or" id="jouer" type="button">Jouer</button>`);
+    <button class="btn or" id="jouer" type="button">Jouer contre les bots</button>
+    <fieldset class="choix"><legend>Jouer en ligne (2 à 4 joueurs)</legend>
+      <label for="pseudo" class="message">Votre pseudo</label>
+      <input class="champ" id="pseudo" type="text" maxlength="16" autocomplete="nickname" value="${esc(pseudo)}" placeholder="Joueur">
+      <button class="btn" id="creer" type="button">Créer une salle</button>
+      <div class="ligne">
+        <input class="champ" id="code" type="text" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Code de la salle" aria-label="Code de la salle">
+        <button class="btn" id="rejoindre" type="button">Rejoindre</button>
+      </div>
+      <p class="message" id="msg-reseau" aria-live="polite"></p>
+    </fieldset>`);
   $("#jouer").addEventListener("click", () => {
     const val = (n) => document.querySelector(`input[name="${n}"]:checked`).value;
     S.mode = val("mode"); S.niveau = val("niveau"); S.cible = Number(val("cible")); S.voix = val("voix"); S.rapide = $("#rapide").checked;
     ecrireReglages(); cacherFiche(); jouerPartie();
   });
+  const lirePseudo = () => {
+    const p = propre($("#pseudo").value);
+    try { localStorage.setItem("belote-pseudo", p); } catch (e) { /* stockage indisponible */ }
+    return p;
+  };
+  const reglagesEnLigne = () => {
+    const val = (n) => document.querySelector(`input[name="${n}"]:checked`).value;
+    S.mode = val("mode"); S.niveau = val("niveau"); S.cible = Number(val("cible")); S.voix = val("voix"); S.rapide = $("#rapide").checked;
+    ecrireReglages();
+  };
+  $("#creer").addEventListener("click", () => { reglagesEnLigne(); ouvrirSalle(lirePseudo()); });
+  $("#rejoindre").addEventListener("click", () => { reglagesEnLigne(); rejoindre($("#code").value, lirePseudo()); });
+  if (R.message) messageReseau(R.message.txt, R.message.erreur);
   $("#jouer").focus();
 }
 
-$("#btn-nouvelle").addEventListener("click", menu);
+$("#btn-nouvelle").addEventListener("click", () => { R.message = null; menu(); });
 { const r = lireReglages(); if (r.mode) S.mode = r.mode; if (r.niveau) S.niveau = r.version >= 2 || r.niveau !== "malin" ? r.niveau : "expert"; if (r.cible) S.cible = r.cible; if (r.voix) S.voix = r.voix; S.rapide = !!r.rapide; }
 render();
 menu();
