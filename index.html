@@ -1541,6 +1541,7 @@ async function basculerMedia(kind) {
   synchroniserMedia(); majBoutonsMedia(); majRelais();
 }
 function arreterFlux(kind) {
+  for (const cle of [...RELAIS.debutAppel.keys()]) if (cle.startsWith(kind + ":")) RELAIS.debutAppel.delete(cle);
   const f = M.flux[kind];
   if (f) try { f.getTracks().forEach((t) => t.stop()); } catch (e) { /* flux déjà arrêté */ }
   M.flux[kind] = null;
@@ -1751,10 +1752,13 @@ function relaisNecessaire() {
     for (const kind of ["audio", "video"]) {
       if (!M.flux[kind]) continue;
       if (!id) return true;
-      const appel = M.appels.get(kind + ":" + id);
+      const cle = kind + ":" + id;
+      const appel = M.appels.get(cle);
       const etat = appel && appel.peerConnection && appel.peerConnection.iceConnectionState;
-      if (etat === "connected" || etat === "completed") continue;
-      const debut = RELAIS.debutAppel.get(kind + ":" + id) || maintenant;
+      if (etat === "connected" || etat === "completed") { RELAIS.debutAppel.delete(cle); continue; }
+      // pas d'appel établi : la connexion directe a 5 secondes pour aboutir, sinon on passe en secours
+      let debut = RELAIS.debutAppel.get(cle);
+      if (!debut) { debut = maintenant; RELAIS.debutAppel.set(cle, debut); }
       if (maintenant - debut > 5000) return true;
     }
   }
