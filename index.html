@@ -173,7 +173,7 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 .tuile video.miroir { transform: scaleX(-1); }
 .tuile img.relais { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .tuile .visage { width: 50%; color: #fff; opacity: 0.4; }
-.tuile .etiquette { position: absolute; left: 4px; bottom: 4px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #000b; color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 12px; }
+.tuile .etiquette { display: none; position: absolute; left: 4px; bottom: 4px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #000b; color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 12px; }
 .tuile .son { position: absolute; left: 6px; top: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px #0007; }
 .actions-media { display: flex; flex-wrap: wrap; gap: 8px; }
 .verdict { font-weight: 700; }
@@ -1679,6 +1679,8 @@ function majVisio() {
     const videoVisible = soi ? !!M.flux.video : (!!flux || imageFraiche);
     t.classList.toggle("masquer", videoVisible && audioActif);
     t.querySelector(".etiquette").textContent = nomVisio(q);
+    t.title = nomVisio(q);
+    t.setAttribute("aria-label", "Vignette de " + nomVisio(q));
     // lecteur audio (autres joueurs) : rattaché au document, pas masqué par display:none
     if (!soi && id) {
       const r = M.recus.get("audio:" + id);
