@@ -151,6 +151,16 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 .place { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; text-align: left; min-height: 38px; overflow-wrap: anywhere; }
 .place.moi { border-color: var(--or); box-shadow: inset 0 0 0 1px var(--or); font-weight: 600; }
 .place.libre { color: var(--muted); font-weight: 400; }
+.btn[aria-pressed="true"] { background: var(--or); color: var(--or-fg); border-color: var(--or); }
+.tuiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tuile { position: relative; aspect-ratio: 4 / 3; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; display: grid; place-items: center; }
+.tuile video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.tuile video.miroir { transform: scaleX(-1); }
+.tuile .visage { width: 52%; color: var(--muted); opacity: 0.6; }
+.tuile .etiquette { position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #000b; color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 12px; }
+.tuile .son { position: absolute; top: 7px; right: 7px; width: 10px; height: 10px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px #0007; }
+.tuile.sans-son .son { background: var(--muted); opacity: 0.6; }
+.actions-media { display: flex; flex-wrap: wrap; gap: 8px; }
 .verdict { font-weight: 700; }
 .verdict.ok { color: var(--ok); } .verdict.ko { color: var(--ko); }
 .rouge { color: var(--rouge); }
@@ -180,6 +190,15 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
       <div class="main" id="main" aria-label="Votre main"></div>
     </section>
     <aside class="cote">
+      <section class="panneau" id="visio" hidden>
+        <h2>Joueurs en ligne</h2>
+        <div class="tuiles" id="visio-tuiles"></div>
+        <div class="actions-media">
+          <button class="btn" type="button" data-media="audio" aria-pressed="false">Micro</button>
+          <button class="btn" type="button" data-media="video" aria-pressed="false">Caméra</button>
+        </div>
+        <p class="message" id="msg-media" aria-live="polite"></p>
+      </section>
       <section class="panneau">
         <h2>Journal</h2>
         <ul class="journal" id="journal"></ul>
@@ -1170,6 +1189,7 @@ const R = {
   lienHote: null,                     // client : connexion vers l'hôte
   attentes: new Map(), fiches: new Map(), idDemande: 0, idFiche: 0,
   nomsAbs: [null, null, null, null], message: null,
+  peersVus: [null, null, null, null],   // client : identifiants réseau des joueurs, par siège
 };
 const ORDRE_PLACES = [0, 2, 1, 3]; // le 2e joueur devient le partenaire de l'hôte
 
@@ -1185,6 +1205,7 @@ function diffuserEtat() {
       preneur: S.preneur, contrat: S.contrat, mult: S.mult, retournee: S.retournee, tour: S.tour, gagnant: S.gagnant,
       pli: S.pli, bulles: S.bulles, journal: S.journal, enchereCourante: S.enchereCourante, toast: S.toast,
       noms: R.nomsAbs.map((n, i) => (i === q ? null : n)),
+      peers: R.places.map((p) => (p && p.peerId) || null),
       mains: S.mains.map((m, i) => (i === q ? m : m.length)),
     });
   }
@@ -1195,7 +1216,7 @@ function nbHumains() { return R.places.filter(Boolean).length; }
 
 function diffuserSalle() {
   for (let q = 0; q < 4; q++) {
-    envoyer(q, { t: "salle", code: R.code, moi: q, places: R.places.map((p) => p && { nom: p.nom }) });
+    envoyer(q, { t: "salle", code: R.code, moi: q, places: R.places.map((p) => p && { nom: p.nom }), peers: R.places.map((p) => (p && p.peerId) || null) });
   }
 }
 
@@ -1219,10 +1240,16 @@ function afficherSalle() {
     ${hote
       ? `<button class="btn or" id="lancer" type="button" ${n < 2 ? "disabled" : ""}>${n < 2 ? "En attente d'un autre joueur…" : `Lancer la partie (${n} joueurs)`}</button>`
       : `<p class="message">En attente du lancement par l'hôte…</p>`}
+    <div class="actions-media">
+      <button class="btn" type="button" data-media="audio" aria-pressed="false">Micro</button>
+      <button class="btn" type="button" data-media="video" aria-pressed="false">Caméra</button>
+    </div>
+    <p class="message">Micro et caméra sont facultatifs. Tout passe directement entre les navigateurs des joueurs.</p>
     <button class="btn" id="quitter" type="button">Quitter la salle</button>`);
   document.querySelectorAll("#fiche button[data-q]").forEach((b) => b.addEventListener("click", () => demanderPlace(Number(b.dataset.q))));
   const lancer = $("#lancer");
   if (lancer) lancer.addEventListener("click", lancerEnLigne);
+  majBoutonsMedia();
   $("#quitter").addEventListener("click", () => { quitterReseau(); menu(); });
 }
 
@@ -1249,10 +1276,11 @@ function ouvrirSalle(pseudo) {
     try { peer = R.usine("belote-" + code); } catch (e) { return messageReseau("Connexion réseau impossible.", true); }
     peer.on("open", () => {
       R.role = "hote"; R.phase = "salle"; R.peer = peer; R.code = code;
-      R.places = [{ nom: propre(pseudo), lien: null }, null, null, null];
+      R.places = [{ nom: propre(pseudo), lien: null, peerId: peer.id }, null, null, null];
       S.moi = 0; afficherSalle();
     });
     peer.on("connection", (conn) => accepter(conn));
+    accepterAppelsMedia(peer);
     peer.on("error", (e) => {
       if (e.type === "unavailable-id" && n < 5) return essayer(n + 1);
       if (R.role === "hote") return;
@@ -1270,8 +1298,8 @@ function accepter(conn) {
       const q = ORDRE_PLACES.find((i) => !R.places[i]);
       if (q === undefined) { conn.send({ t: "refus", raison: "La salle est pleine." }); setTimeout(() => conn.close(), 200); return; }
       conn._siege = q;
-      R.places[q] = { nom: propre(msg.nom), lien: conn };
-      diffuserSalle(); afficherSalle();
+      R.places[q] = { nom: propre(msg.nom), lien: conn, peerId: typeof msg.peerId === "string" ? msg.peerId.slice(0, 64) : null };
+      diffuserSalle(); afficherSalle(); synchroniserMedia();
       return;
     }
     const q = conn._siege;
@@ -1294,10 +1322,11 @@ function joueurParti(conn) {
   if (q === undefined || !R.places[q] || R.places[q].lien !== conn) return;
   const nomParti = R.places[q].nom;
   R.places[q] = null;
-  if (R.phase === "salle") { diffuserSalle(); afficherSalle(); return; }
+  if (R.phase === "salle") { diffuserSalle(); afficherSalle(); synchroniserMedia(); return; }
   // En pleine partie : un bot prend la place et décide à sa place.
   S.sieges[q] = "bot"; R.nomsAbs[q] = null; S.noms[q] = null;
   log(`${esc(nomParti)} a quitté la partie : un bot le remplace.`);
+  synchroniserMedia();
   for (const [id, a] of [...R.attentes]) {
     if (a.p === q) { R.attentes.delete(id); a.res(reponseBot(q, a.kind, a.d)); }
   }
@@ -1323,6 +1352,159 @@ function retourSalle() {
   diffuserSalle(); afficherSalle();
 }
 
+/* ---- Voix et vidéo entre joueurs (WebRTC, un appel par joueur et par type de flux) ---- */
+/* Chaque joueur publie son micro et sa caméra séparément : il appelle les autres joueurs humains avec le flux.
+   Les destinataires répondent sans rien envoyer en retour. Rien ne transite par un serveur de jeu. */
+const M = {
+  flux: { audio: null, video: null },   // mes flux publiés
+  appels: new Map(),                    // "kind:peerId" -> appel sortant
+  recus: new Map(),                     // "kind:peerId" -> { appel, flux }
+  lecteurs: new Map(),                  // peerId -> <audio>
+  signature: "",
+};
+const peersActuels = () => (R.role === "hote" ? R.places.map((p) => (p && p.peerId) || null) : R.peersVus || [null, null, null, null]);
+const monPeerId = () => (R.peer && R.peer.id) || null;
+
+function accepterAppelsMedia(peer) {
+  peer.on("call", (appel) => {
+    const peers = peersActuels();
+    if (R.role === "solo" || !peers.includes(appel.peer) || appel.peer === monPeerId()) { try { appel.close(); } catch (e) { /* déjà fermé */ } return; }
+    const kind = appel.metadata && appel.metadata.kind === "video" ? "video" : "audio";
+    const cle = kind + ":" + appel.peer;
+    try { appel.answer(); } catch (e) { return; }
+    appel.on("stream", (flux) => { M.recus.set(cle, { appel, flux }); majVisio(); });
+    appel.on("close", () => { if (M.recus.get(cle) && M.recus.get(cle).appel === appel) M.recus.delete(cle); majVisio(); });
+    appel.on("error", () => { M.recus.delete(cle); majVisio(); });
+  });
+}
+
+function synchroniserMedia() {
+  const voulus = new Set();
+  if (R.peer && R.role !== "solo") {
+    peersActuels().forEach((id) => {
+      if (!id || id === monPeerId()) return;
+      for (const kind of ["audio", "video"]) {
+        if (!M.flux[kind]) continue;
+        const cle = kind + ":" + id;
+        voulus.add(cle);
+        if (M.appels.has(cle)) continue;
+        try {
+          const appel = R.peer.call(id, M.flux[kind], { metadata: { kind } });
+          M.appels.set(cle, appel);
+          const fin = () => { if (M.appels.get(cle) === appel) M.appels.delete(cle); };
+          appel.on("close", fin); appel.on("error", fin);
+        } catch (e) { /* appel impossible pour l'instant */ }
+      }
+    });
+  }
+  for (const [cle, appel] of [...M.appels]) {
+    if (!voulus.has(cle)) { try { appel.close(); } catch (e) { /* déjà fermé */ } M.appels.delete(cle); }
+  }
+  // flux reçus d'un joueur qui n'est plus là
+  const presents = new Set(peersActuels().filter(Boolean));
+  for (const [cle, r] of [...M.recus]) {
+    if (!presents.has(cle.slice(cle.indexOf(":") + 1))) { try { r.appel.close(); } catch (e) { /* déjà fermé */ } M.recus.delete(cle); }
+  }
+  majVisio();
+}
+
+function messageMedia(txt) {
+  const el = document.querySelector("#msg-media");
+  if (el) el.textContent = txt || "";
+}
+async function basculerMedia(kind) {
+  if (M.flux[kind]) { arreterFlux(kind); synchroniserMedia(); majBoutonsMedia(); return; }
+  const md = typeof navigator !== "undefined" && navigator.mediaDevices;
+  if (!md || !md.getUserMedia) { messageMedia("Ce navigateur ne permet pas d'utiliser le micro ou la caméra ici."); return; }
+  try {
+    M.flux[kind] = await md.getUserMedia(kind === "audio"
+      ? { audio: { echoCancellation: true, noiseSuppression: true }, video: false }
+      : { video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: "user" }, audio: false });
+    messageMedia("");
+  } catch (e) {
+    messageMedia(kind === "audio" ? "Accès au micro refusé ou indisponible." : "Accès à la caméra refusé ou indisponible.");
+  }
+  synchroniserMedia(); majBoutonsMedia();
+}
+function arreterFlux(kind) {
+  const f = M.flux[kind];
+  if (f) try { f.getTracks().forEach((t) => t.stop()); } catch (e) { /* flux déjà arrêté */ }
+  M.flux[kind] = null;
+}
+function arreterMedia() {
+  arreterFlux("audio"); arreterFlux("video");
+  for (const appel of M.appels.values()) try { appel.close(); } catch (e) { /* déjà fermé */ }
+  for (const r of M.recus.values()) try { r.appel.close(); } catch (e) { /* déjà fermé */ }
+  M.appels.clear(); M.recus.clear();
+  majVisio(); majBoutonsMedia();
+}
+function majBoutonsMedia() {
+  document.querySelectorAll("[data-media]").forEach((b) => {
+    const actif = !!M.flux[b.dataset.media];
+    b.setAttribute("aria-pressed", String(actif));
+    b.textContent = (b.dataset.media === "audio" ? "Micro" : "Caméra") + (actif ? " activé" : "");
+  });
+}
+
+const TETE_SVG = '<svg class="visage" viewBox="0 0 64 64" role="img" aria-label="Caméra éteinte" fill="currentColor"><circle cx="32" cy="22" r="12"/><path d="M8 60c0-13 10-22 24-22s24 9 24 22z"/></svg>';
+function nomVisio(q) {
+  if (q === S.moi) return "Vous";
+  if (R.role === "hote") return (R.places[q] && R.places[q].nom) || "Joueur";
+  return S.noms[q] || (R.placesVues[q] && R.placesVues[q].nom) || "Joueur";
+}
+/* Met à jour la fenêtre des joueurs connectés : vidéo si le joueur filme, sinon une tête grisée. */
+function majVisio() {
+  const panneau = document.querySelector("#visio");
+  const zone = document.querySelector("#visio-tuiles");
+  if (!panneau || !zone) return;
+  const peers = peersActuels();
+  const humains = R.role === "solo" ? [] : peers.map((id, q) => (id ? { id, q } : null)).filter(Boolean);
+  panneau.hidden = humains.length < 2;
+  const moi = monPeerId();
+  const ids = new Set(humains.map((h) => h.id));
+  zone.querySelectorAll(".tuile").forEach((t) => { if (!ids.has(t.dataset.id)) t.remove(); });
+  for (const { id, q } of humains) {
+    let t = zone.querySelector(`.tuile[data-id="${id}"]`);
+    if (!t) {
+      t = document.createElement("div");
+      t.className = "tuile"; t.dataset.id = id;
+      t.innerHTML = `${TETE_SVG}<video playsinline autoplay muted hidden></video><span class="son" hidden></span><span class="etiquette"></span>`;
+      zone.appendChild(t);
+    }
+    const soi = id === moi;
+    const flux = soi ? M.flux.video : (M.recus.get("video:" + id) || {}).flux;
+    const video = t.querySelector("video");
+    if (video.srcObject !== (flux || null)) video.srcObject = flux || null;
+    video.classList.toggle("miroir", soi);
+    video.hidden = !flux;
+    t.querySelector(".visage").style.display = flux ? "none" : "";
+    const audioActif = soi ? !!M.flux.audio : M.recus.has("audio:" + id);
+    const son = t.querySelector(".son");
+    son.hidden = !audioActif;
+    son.setAttribute("title", "Micro activé");
+    t.querySelector(".etiquette").textContent = nomVisio(q);
+    // lecteur audio caché pour les autres joueurs
+    if (!soi) {
+      const r = M.recus.get("audio:" + id);
+      let lecteur = M.lecteurs.get(id);
+      if (r && !lecteur) {
+        lecteur = document.createElement("audio");
+        lecteur.autoplay = true; lecteur.hidden = true;
+        zone.appendChild(lecteur); M.lecteurs.set(id, lecteur);
+      }
+      if (lecteur && lecteur.srcObject !== (r ? r.flux : null)) lecteur.srcObject = r ? r.flux : null;
+      if (!r && lecteur) { lecteur.srcObject = null; lecteur.remove(); M.lecteurs.delete(id); }
+    }
+  }
+  for (const [id, l] of [...M.lecteurs]) if (!ids.has(id)) { l.srcObject = null; l.remove(); M.lecteurs.delete(id); }
+  majBoutonsMedia();
+}
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest && e.target.closest("[data-media]");
+  if (b) basculerMedia(b.dataset.media);
+});
+
 /* ---- Client ---- */
 function rejoindre(code, pseudo) {
   if (typeof Peer === "undefined") return messageReseau("Le jeu en ligne n'est pas disponible : la bibliothèque réseau n'a pas pu être chargée.", true);
@@ -1334,12 +1516,13 @@ function rejoindre(code, pseudo) {
   try { peer = R.usine(null); } catch (e) { return messageReseau("Connexion réseau impossible.", true); }
   R.peer = peer;
   const delai = setTimeout(() => { if (R.role !== "client") { quitterReseau(); messageReseau("La salle ne répond pas. Vérifiez le code et réessayez.", true); } }, 15000);
+  accepterAppelsMedia(peer);
   peer.on("open", () => {
     const conn = peer.connect("belote-" + code, { reliable: true, serialization: "json" });
     conn.on("open", () => {
       clearTimeout(delai);
       R.role = "client"; R.lienHote = conn; R.code = code;
-      conn.send({ t: "hello", nom: propre(pseudo) });
+      conn.send({ t: "hello", nom: propre(pseudo), peerId: peer.id });
     });
     conn.on("data", traiterMessageClient);
     conn.on("close", () => { if (R.role === "client") { quitterReseau(); menu(); messageReseau("La connexion avec l'hôte est perdue.", true); } });
@@ -1357,7 +1540,8 @@ function traiterMessageClient(msg) {
   switch (msg.t) {
     case "salle":
       R.phase = "salle"; R.placesVues = msg.places; R.code = msg.code; S.moi = msg.moi;
-      afficherSalle();
+      R.peersVus = msg.peers || [null, null, null, null];
+      afficherSalle(); synchroniserMedia();
       break;
     case "debut":
       R.phase = "jeu"; S.partieId++; S.journal = []; S.attenteCarte = null; cacherFiche();
@@ -1377,6 +1561,8 @@ function appliquerEtat(m) {
   S.enchereCourante = m.enchereCourante; S.toast = m.toast; S.noms = m.noms;
   S.sieges = [0, 1, 2, 3].map((q) => (q === m.L ? "local" : "distant"));
   S.mains = m.mains.map((x) => (Array.isArray(x) ? x : new Array(x).fill(null)));
+  const signature = JSON.stringify(m.peers || []);
+  if (signature !== M.signature) { M.signature = signature; R.peersVus = m.peers || [null, null, null, null]; synchroniserMedia(); }
   render(); renderJournal();
 }
 async function traiterDemande(msg) {
@@ -1390,6 +1576,7 @@ async function traiterFiche(msg) {
 }
 
 function quitterReseau() {
+  arreterMedia();
   try {
     if (R.role === "hote") diffuser({ t: "ferme" });
     for (const p of R.places) if (p && p.lien) try { p.lien.close(); } catch (e) { /* déjà fermé */ }
@@ -1398,7 +1585,7 @@ function quitterReseau() {
   } catch (e) { /* réseau déjà coupé */ }
   R.role = "solo"; R.phase = null; R.peer = null; R.lienHote = null; R.code = null;
   R.places = [null, null, null, null]; R.placesVues = [null, null, null, null];
-  R.attentes.clear(); R.fiches.clear();
+  R.attentes.clear(); R.fiches.clear(); R.peersVus = [null, null, null, null]; M.signature = "";
   S.moi = 0; S.sieges = ["local", "bot", "bot", "bot"]; S.noms = [null, null, null, null];
 }
 function messageReseau(txt, erreur) {
