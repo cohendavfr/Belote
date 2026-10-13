@@ -60,7 +60,15 @@ button { font: inherit; color: inherit; }
 .accueil[hidden] { display: none; }
 .carte-accueil { width: min(380px, 100%); display: grid; gap: 10px; padding: 18px; border-radius: 16px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); box-shadow: 0 10px 30px #0006; }
 .carte-accueil h2 { font: 700 26px/1 var(--font-titre); margin: 0; }
-.carte-accueil .gros { padding: 12px 14px; font-size: 16px; }
+.carte-accueil .segment { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.carte-accueil .segment legend { grid-column: 1 / -1; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 0; margin-bottom: 4px; }
+.option { position: relative; display: block; }
+.option input { position: absolute; opacity: 0; inset: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.option span { display: block; text-align: center; padding: 9px 8px; border: 1px solid var(--line); border-radius: 10px; font-weight: 600; background: var(--bg); }
+.option input:checked + span { background: var(--or); border-color: var(--or); color: var(--or-fg); }
+.option input:focus-visible + span { outline: 3px solid var(--or); outline-offset: 2px; }
+#bloc-ligne, #bloc-bots { display: grid; gap: 10px; }
+#bloc-ligne[hidden], #bloc-bots[hidden] { display: none; }
 .carte-accueil .separateur { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
 .carte-accueil .separateur::before, .carte-accueil .separateur::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .carte-accueil .resume { margin: 0; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
@@ -654,6 +662,7 @@ const S = {
   partieId: 0, attenteCarte: null, enchereCourante: null, voix: "fr",
   moi: 0, sieges: ["local", "bot", "bot", "bot"], noms: [null, null, null, null], pilote: null, sansDelai: false,
   accueilActif: false, // première page affichée sur la table
+  lieu: "ligne",      // "ligne" (par défaut) ou "bots"
   avis: null, // { txt, jusqua } : message affiché un moment sur le tapis (joueur parti...)
   plisGagnes: [0, 0, 0, 0], // plis ramassés par chaque joueur dans la donne
 };
@@ -2253,7 +2262,7 @@ function lireReglages() {
   try { return JSON.parse(localStorage.getItem("belote-reglages") || "{}"); } catch (e) { return {}; }
 }
 function ecrireReglages() {
-  try { localStorage.setItem("belote-reglages", JSON.stringify({ version: 2, mode: S.mode, niveau: S.niveau, cible: S.cible, rapide: S.rapide, voix: S.voix })); } catch (e) { /* stockage indisponible */ }
+  try { localStorage.setItem("belote-reglages", JSON.stringify({ version: 2, mode: S.mode, lieu: S.lieu, niveau: S.niveau, cible: S.cible, rapide: S.rapide, voix: S.voix })); } catch (e) { /* stockage indisponible */ }
 }
 
 function arreterVoix() { try { window.speechSynthesis.cancel(); } catch (e) { /* pas de synthèse vocale */ } }
@@ -2280,28 +2289,47 @@ function construireAccueil() {
     const d = JSON.parse(localStorage.getItem("belote-derniere-salle") || "null");
     if (d && /^[A-Z2-9]{5}$/.test(d.code) && Date.now() - d.ts < 3 * 3600 * 1000) derniere = d;
   } catch (e) { /* stockage indisponible */ }
+  const choix = (nom, val, lib, coche) => `<label class="option"><input type="radio" name="${nom}" value="${val}" ${coche ? "checked" : ""}><span>${lib}</span></label>`;
   $("#accueil").innerHTML = `<div class="carte-accueil">
     <h2>Belote</h2>
-    <button class="btn or gros" id="jouer" type="button">Jouer contre les bots</button>
+    <fieldset class="segment"><legend>Jeu</legend>
+      ${choix("mode", "belote", "Belote contrat", S.mode !== "coinche")}
+      ${choix("mode", "coinche", "Coinche", S.mode === "coinche")}
+    </fieldset>
+    <fieldset class="segment"><legend>Jouer</legend>
+      ${choix("lieu", "ligne", "En ligne", S.lieu !== "bots")}
+      ${choix("lieu", "bots", "Contre les bots", S.lieu === "bots")}
+    </fieldset>
+    <div id="bloc-ligne" ${S.lieu === "bots" ? "hidden" : ""}>
+      <input class="champ" id="pseudo" type="text" maxlength="16" autocomplete="nickname" value="${esc(pseudo)}" placeholder="Votre pseudo" aria-label="Votre pseudo">
+      ${derniere ? `<button class="btn or" id="revenir" type="button">Revenir dans la salle ${esc(derniere.code)}</button>` : ""}
+      <button class="btn or" id="creer" type="button">Créer une salle</button>
+      <div class="ligne">
+        <input class="champ" id="code" type="text" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Code de la salle" aria-label="Code de la salle">
+        <button class="btn" id="rejoindre" type="button">Rejoindre</button>
+      </div>
+      <p class="message">De 2 à 4 joueurs, les places libres sont tenues par des bots. Si vous rejoignez une salle, le jeu est celui de l'hôte.</p>
+      <p class="message" id="msg-reseau" aria-live="polite"></p>
+    </div>
+    <div id="bloc-bots" ${S.lieu === "bots" ? "" : "hidden"}>
+      <button class="btn or" id="jouer" type="button">Jouer</button>
+    </div>
     <p class="resume">
-      <span>${S.mode === "coinche" ? "Coinche" : "Belote contrat"} · ${S.cible} points · ${LIBELLE_VOIX[S.voix] || ""}</span>
+      <span>${S.cible} points · ${LIBELLE_VOIX[S.voix] || ""}</span>
       <button class="lien" id="ouvrir-reglages" type="button">Réglages</button>
     </p>
-    <div class="separateur">En ligne, de 2 à 4 joueurs</div>
-    <input class="champ" id="pseudo" type="text" maxlength="16" autocomplete="nickname" value="${esc(pseudo)}" placeholder="Votre pseudo" aria-label="Votre pseudo">
-    ${derniere ? `<button class="btn or" id="revenir" type="button">Revenir dans la salle ${esc(derniere.code)}</button>` : ""}
-    <button class="btn" id="creer" type="button">Créer une salle</button>
-    <div class="ligne">
-      <input class="champ" id="code" type="text" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Code de la salle" aria-label="Code de la salle">
-      <button class="btn" id="rejoindre" type="button">Rejoindre</button>
-    </div>
-    <p class="message" id="msg-reseau" aria-live="polite"></p>
   </div>`;
   const lirePseudo = () => {
     const p = propre($("#pseudo").value);
     try { localStorage.setItem("belote-pseudo", p); } catch (e) { /* stockage indisponible */ }
     return p;
   };
+  document.querySelectorAll('#accueil input[name="mode"]').forEach((r) => r.addEventListener("change", () => { S.mode = r.value; ecrireReglages(); }));
+  document.querySelectorAll('#accueil input[name="lieu"]').forEach((r) => r.addEventListener("change", () => {
+    S.lieu = r.value; ecrireReglages();
+    $("#bloc-ligne").hidden = S.lieu === "bots";
+    $("#bloc-bots").hidden = S.lieu !== "bots";
+  }));
   $("#jouer").addEventListener("click", () => {
     ecrireReglages(); S.accueilActif = false; majAccueilVisible(); jouerPartie();
   });
@@ -2317,10 +2345,6 @@ function construireAccueil() {
 function reglages() {
   const radio = (nom, val, lib, coche) => `<label><input type="radio" name="${nom}" value="${val}" ${coche ? "checked" : ""}> ${lib}</label>`;
   afficherFiche(`<h2>Réglages</h2>
-    <fieldset class="choix"><legend>Mode</legend>
-      ${radio("mode", "belote", "Belote contrat", S.mode === "belote")}
-      ${radio("mode", "coinche", "Coinche (enchères au point)", S.mode === "coinche")}
-    </fieldset>
     <fieldset class="choix"><legend>Objectif</legend>
       ${radio("cible", "500", "500 points (partie courte)", S.cible === 500)}
       ${radio("cible", "1000", "1000 points", S.cible === 1000)}
@@ -2335,11 +2359,11 @@ function reglages() {
       </div>
     </fieldset>
     <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="rapide" ${S.rapide ? "checked" : ""}> Rythme rapide</label>
-    <p class="message">${R.role === "client" ? "En ligne, le mode et l'objectif sont ceux de l'hôte." : "Les bots sont toujours experts."} Les changements s'appliquent à la prochaine partie.</p>
+    <p class="message">${R.role === "client" ? "En ligne, le jeu et l'objectif sont ceux de l'hôte." : "Les bots sont toujours experts."} Les changements s'appliquent à la prochaine partie.</p>
     <button class="btn or" id="reglages-ok" type="button">Enregistrer</button>`);
   $("#reglages-ok").addEventListener("click", () => {
     const val = (n) => document.querySelector(`input[name="${n}"]:checked`).value;
-    S.mode = val("mode"); S.cible = Number(val("cible")); S.voix = val("voix"); S.rapide = $("#rapide").checked;
+    S.cible = Number(val("cible")); S.voix = val("voix"); S.rapide = $("#rapide").checked;
     ecrireReglages();
     cacherFiche();
     if (S.accueilActif) construireAccueil();
@@ -2350,7 +2374,7 @@ function reglages() {
 $("#btn-nouvelle").addEventListener("click", () => { R.message = null; menu(); });
 $("#btn-reglages").addEventListener("click", reglages);
 $("#btn-quitter").addEventListener("click", confirmerQuitter);
-{ const r = lireReglages(); if (r.mode) S.mode = r.mode; S.niveau = "expert"; if (r.cible) S.cible = r.cible; if (r.voix) S.voix = r.voix; S.rapide = !!r.rapide; }
+{ const r = lireReglages(); if (r.mode) S.mode = r.mode; if (r.lieu === "bots") S.lieu = "bots"; S.niveau = "expert"; if (r.cible) S.cible = r.cible; if (r.voix) S.voix = r.voix; S.rapide = !!r.rapide; }
 render();
 menu();
 
