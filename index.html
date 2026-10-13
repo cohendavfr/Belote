@@ -685,7 +685,7 @@ function render() {
     const tas = n ? `<span class="pile" title="Plis gagnés : ${n}" aria-label="${n} pli${n > 1 ? "s" : ""} gagné${n > 1 ? "s" : ""}"><span class="tas">${
       Array.from({ length: Math.min(n, 5) }, (_, i) => `<i style="left:${i * 2}px;top:${(4 - i) * 2}px"></i>`).join("")}</span><b>${n}</b></span>` : "";
     const corps = q === S.moi ? plaque + tas + bulle
-      : `${plaque}<span class="carte dos"><span class="nb">${S.mains[q].length}</span></span>${tas}${bulle}`;
+      : `${plaque}${S.mains[q].length ? `<span class="carte dos"><span class="nb">${S.mains[q].length}</span></span>` : ""}${tas}${bulle}`;
     $("#siege-" + rel(q) + " .siege-corps").innerHTML = corps;
   }
   // contrat (en haut à gauche de la table)
