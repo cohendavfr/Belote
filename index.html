@@ -54,6 +54,18 @@ button { font: inherit; color: inherit; }
 .btn.or:hover { filter: brightness(1.06); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .actions-tete { display: flex; flex-wrap: wrap; gap: 8px; }
+.table { position: relative; }
+.table.avec-accueil { min-height: 560px; }
+.accueil { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; padding: 12px; border-radius: inherit; background: #0000004d; }
+.accueil[hidden] { display: none; }
+.carte-accueil { width: min(380px, 100%); display: grid; gap: 10px; padding: 18px; border-radius: 16px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); box-shadow: 0 10px 30px #0006; }
+.carte-accueil h2 { font: 700 26px/1 var(--font-titre); margin: 0; }
+.carte-accueil .gros { padding: 12px 14px; font-size: 16px; }
+.carte-accueil .separateur { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.carte-accueil .separateur::before, .carte-accueil .separateur::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.carte-accueil .resume { margin: 0; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.lien { background: none; border: 0; padding: 0; color: var(--fg); text-decoration: underline; cursor: pointer; font: inherit; font-size: 13px; }
+.lien:focus-visible { outline: 3px solid var(--or); outline-offset: 2px; border-radius: 4px; }
 .btn.danger { border-color: var(--ko); color: var(--ko); }
 .btn.danger:hover { border-color: var(--ko); background: var(--bg); }
 .info.avis { justify-self: center; background: #8a2c24; color: #fff; border-radius: 999px; padding: 5px 14px; font-weight: 600; }
@@ -199,10 +211,11 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
   <header class="barre">
     <h1>Belote</h1>
     <div class="scores" id="scores" aria-live="polite"></div>
-    <div class="actions-tete"><button class="btn" id="btn-nouvelle" type="button">Nouvelle partie</button><button class="btn danger" id="btn-quitter" type="button" hidden>Quitter la partie</button></div>
+    <div class="actions-tete"><button class="btn" id="btn-nouvelle" type="button">Nouvelle partie</button><button class="btn" id="btn-reglages" type="button">Réglages</button><button class="btn danger" id="btn-quitter" type="button" hidden>Quitter la partie</button></div>
   </header>
   <div class="jeu">
     <section class="table" id="table" aria-label="Table de jeu">
+      <div class="accueil" id="accueil" hidden></div>
       <div class="contrat" id="contrat" aria-live="polite"></div>
       <div class="siege s2" id="siege-2"><div class="siege-visio"></div><div class="siege-corps"></div></div>
       <div class="siege s1" id="siege-1"><div class="siege-visio"></div><div class="siege-corps"></div></div>
@@ -640,6 +653,7 @@ const S = {
   contrat: null, mult: 1, retournee: null, tour: null, gagnant: null, bulles: {}, journal: [],
   partieId: 0, attenteCarte: null, enchereCourante: null, voix: "fr",
   moi: 0, sieges: ["local", "bot", "bot", "bot"], noms: [null, null, null, null], pilote: null, sansDelai: false,
+  accueilActif: false, // première page affichée sur la table
   avis: null, // { txt, jusqua } : message affiché un moment sur le tapis (joueur parti...)
   plisGagnes: [0, 0, 0, 0], // plis ramassés par chaque joueur dans la donne
 };
@@ -1166,8 +1180,14 @@ async function jouerDonne(donneur) {
 }
 
 /* ---- Fiches (menu, bilan, fin) ---- */
-function afficherFiche(html) { $("#fiche").innerHTML = html; $("#voile").hidden = false; }
-function cacherFiche() { $("#voile").hidden = true; }
+function afficherFiche(html) { $("#fiche").innerHTML = html; $("#voile").hidden = false; majAccueilVisible(); }
+function cacherFiche() { $("#voile").hidden = true; majAccueilVisible(); }
+/* L'accueil (première page) est posé sur la table ; une fiche (réglages, salle, bilan) passe devant. */
+function majAccueilVisible() {
+  const visible = S.accueilActif && $("#voile").hidden;
+  $("#accueil").hidden = !visible;
+  $("#table").classList.toggle("avec-accueil", !!S.accueilActif);
+}
 function attendreFiche(html, idBouton) {
   const id = S.partieId;
   if (S.pilote) { afficherFiche(html); return Promise.resolve(); }
@@ -1228,8 +1248,7 @@ async function jouerPartie() {
   arreterVoix();
   S.scores = [0, 0]; S.journal = []; S.attenteCarte = null; S.mains = [[], [], [], []];
   $("#action").innerHTML = ""; renderJournal();
-  const Cls = { expert: BotExpert, malin: BotMalin, simple: Bot }[S.niveau] || BotExpert;
-  bots = [0, 1, 2, 3].map(() => new Cls());
+  bots = [0, 1, 2, 3].map(() => new BotExpert()); // les bots sont toujours experts
   let donneur = Math.floor(Math.random() * 4);
   try {
     while (Math.max(...S.scores) < S.cible) {
@@ -1303,6 +1322,7 @@ function diffuserSalle() {
 }
 
 function afficherSalle() {
+  S.accueilActif = false;
   majBoutonQuitter();
   const hote = R.role === "hote";
   const places = hote ? R.places : R.placesVues;
@@ -1586,6 +1606,7 @@ function joueurParti(conn, volontaire) {
 
 function lancerEnLigne() {
   if (R.role !== "hote" || nbHumains() < 2) return;
+  S.accueilActif = false;
   R.phase = "jeu";
   S.sieges = R.places.map((p, q) => (!p ? "bot" : p.lien ? "distant" : "local"));
   R.nomsAbs = R.places.map((p) => (p ? p.nom : null));
@@ -2130,7 +2151,7 @@ function traiterMessageClient(msg) {
       afficherSalle(); synchroniserMedia();
       break;
     case "debut":
-      R.phase = "jeu"; S.partieId++; S.journal = []; S.attenteCarte = null; cacherFiche();
+      R.phase = "jeu"; S.partieId++; S.journal = []; S.attenteCarte = null; S.accueilActif = false; cacherFiche();
       break;
     case "etat": appliquerEtat(msg); break;
     case "demande": traiterDemande(msg); break;
@@ -2237,9 +2258,21 @@ function ecrireReglages() {
 
 function arreterVoix() { try { window.speechSynthesis.cancel(); } catch (e) { /* pas de synthèse vocale */ } }
 
+const LIBELLE_VOIX = { fr: "voix françaises", en: "English voices", es: "voces en español", ja: "日本語の音声", off: "sans voix" };
+
+/* Première page : la table est visible, un petit panneau propose de jouer seul ou en ligne. */
 function menu() {
   if (R.role !== "solo") quitterReseau();
   S.partieId++; S.attenteCarte = null; arreterVoix();
+  S.mains = [[], [], [], []]; S.pli = []; S.atout = null; S.preneur = null; S.contrat = null; S.mult = 1;
+  S.retournee = null; S.tour = null; S.gagnant = null; S.bulles = {}; S.plisGagnes = [0, 0, 0, 0]; S.donneur = -1;
+  S.accueilActif = true;
+  cacherFiche();
+  construireAccueil();
+  render();
+}
+
+function construireAccueil() {
   let pseudo = "";
   let derniere = null;
   try { pseudo = localStorage.getItem("belote-pseudo") || ""; } catch (e) { /* stockage indisponible */ }
@@ -2247,17 +2280,46 @@ function menu() {
     const d = JSON.parse(localStorage.getItem("belote-derniere-salle") || "null");
     if (d && /^[A-Z2-9]{5}$/.test(d.code) && Date.now() - d.ts < 3 * 3600 * 1000) derniere = d;
   } catch (e) { /* stockage indisponible */ }
+  $("#accueil").innerHTML = `<div class="carte-accueil">
+    <h2>Belote</h2>
+    <button class="btn or gros" id="jouer" type="button">Jouer contre les bots</button>
+    <p class="resume">
+      <span>${S.mode === "coinche" ? "Coinche" : "Belote contrat"} · ${S.cible} points · ${LIBELLE_VOIX[S.voix] || ""}</span>
+      <button class="lien" id="ouvrir-reglages" type="button">Réglages</button>
+    </p>
+    <div class="separateur">En ligne, de 2 à 4 joueurs</div>
+    <input class="champ" id="pseudo" type="text" maxlength="16" autocomplete="nickname" value="${esc(pseudo)}" placeholder="Votre pseudo" aria-label="Votre pseudo">
+    ${derniere ? `<button class="btn or" id="revenir" type="button">Revenir dans la salle ${esc(derniere.code)}</button>` : ""}
+    <button class="btn" id="creer" type="button">Créer une salle</button>
+    <div class="ligne">
+      <input class="champ" id="code" type="text" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Code de la salle" aria-label="Code de la salle">
+      <button class="btn" id="rejoindre" type="button">Rejoindre</button>
+    </div>
+    <p class="message" id="msg-reseau" aria-live="polite"></p>
+  </div>`;
+  const lirePseudo = () => {
+    const p = propre($("#pseudo").value);
+    try { localStorage.setItem("belote-pseudo", p); } catch (e) { /* stockage indisponible */ }
+    return p;
+  };
+  $("#jouer").addEventListener("click", () => {
+    ecrireReglages(); S.accueilActif = false; majAccueilVisible(); jouerPartie();
+  });
+  $("#ouvrir-reglages").addEventListener("click", reglages);
+  $("#creer").addEventListener("click", () => { ecrireReglages(); ouvrirSalle(lirePseudo()); });
+  const revenir = $("#revenir");
+  if (revenir) revenir.addEventListener("click", () => { ecrireReglages(); rejoindre(derniere.code, lirePseudo() || derniere.pseudo); });
+  $("#rejoindre").addEventListener("click", () => { ecrireReglages(); rejoindre($("#code").value, lirePseudo()); });
+  if (R.message) messageReseau(R.message.txt, R.message.erreur);
+}
+
+/* Réglages : mode, objectif, voix, rythme. Ils valent pour la prochaine partie (en ligne : ceux de l'hôte). */
+function reglages() {
   const radio = (nom, val, lib, coche) => `<label><input type="radio" name="${nom}" value="${val}" ${coche ? "checked" : ""}> ${lib}</label>`;
-  afficherFiche(`<h2>Belote</h2>
-    <p style="margin:0;color:var(--muted)">Seul contre trois bots, ou de 2 à 4 joueurs en ligne.</p>
+  afficherFiche(`<h2>Réglages</h2>
     <fieldset class="choix"><legend>Mode</legend>
       ${radio("mode", "belote", "Belote contrat", S.mode === "belote")}
       ${radio("mode", "coinche", "Coinche (enchères au point)", S.mode === "coinche")}
-    </fieldset>
-    <fieldset class="choix"><legend>Adversaires</legend>
-      ${radio("niveau", "expert", "Experts : ils simulent la donne et se font des appels", S.niveau === "expert")}
-      ${radio("niveau", "malin", "Malins : ils retiennent les cartes", S.niveau === "malin")}
-      ${radio("niveau", "simple", "Simples", S.niveau === "simple")}
     </fieldset>
     <fieldset class="choix"><legend>Objectif</legend>
       ${radio("cible", "500", "500 points (partie courte)", S.cible === 500)}
@@ -2273,44 +2335,22 @@ function menu() {
       </div>
     </fieldset>
     <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="rapide" ${S.rapide ? "checked" : ""}> Rythme rapide</label>
-    <button class="btn or" id="jouer" type="button">Jouer contre les bots</button>
-    <fieldset class="choix"><legend>Jouer en ligne (2 à 4 joueurs)</legend>
-      <label for="pseudo" class="message">Votre pseudo</label>
-      <input class="champ" id="pseudo" type="text" maxlength="16" autocomplete="nickname" value="${esc(pseudo)}" placeholder="Joueur">
-      ${derniere ? `<button class="btn or" id="revenir" type="button">Revenir dans la salle ${esc(derniere.code)}</button>` : ""}
-      <button class="btn" id="creer" type="button">Créer une salle</button>
-      <div class="ligne">
-        <input class="champ" id="code" type="text" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Code de la salle" aria-label="Code de la salle">
-        <button class="btn" id="rejoindre" type="button">Rejoindre</button>
-      </div>
-      <p class="message" id="msg-reseau" aria-live="polite"></p>
-    </fieldset>`);
-  $("#jouer").addEventListener("click", () => {
+    <p class="message">${R.role === "client" ? "En ligne, le mode et l'objectif sont ceux de l'hôte." : "Les bots sont toujours experts."} Les changements s'appliquent à la prochaine partie.</p>
+    <button class="btn or" id="reglages-ok" type="button">Enregistrer</button>`);
+  $("#reglages-ok").addEventListener("click", () => {
     const val = (n) => document.querySelector(`input[name="${n}"]:checked`).value;
-    S.mode = val("mode"); S.niveau = val("niveau"); S.cible = Number(val("cible")); S.voix = val("voix"); S.rapide = $("#rapide").checked;
-    ecrireReglages(); cacherFiche(); jouerPartie();
-  });
-  const lirePseudo = () => {
-    const p = propre($("#pseudo").value);
-    try { localStorage.setItem("belote-pseudo", p); } catch (e) { /* stockage indisponible */ }
-    return p;
-  };
-  const reglagesEnLigne = () => {
-    const val = (n) => document.querySelector(`input[name="${n}"]:checked`).value;
-    S.mode = val("mode"); S.niveau = val("niveau"); S.cible = Number(val("cible")); S.voix = val("voix"); S.rapide = $("#rapide").checked;
+    S.mode = val("mode"); S.cible = Number(val("cible")); S.voix = val("voix"); S.rapide = $("#rapide").checked;
     ecrireReglages();
-  };
-  $("#creer").addEventListener("click", () => { reglagesEnLigne(); ouvrirSalle(lirePseudo()); });
-  const revenir = $("#revenir");
-  if (revenir) revenir.addEventListener("click", () => { reglagesEnLigne(); rejoindre(derniere.code, lirePseudo() || derniere.pseudo); });
-  $("#rejoindre").addEventListener("click", () => { reglagesEnLigne(); rejoindre($("#code").value, lirePseudo()); });
-  if (R.message) messageReseau(R.message.txt, R.message.erreur);
-  $("#jouer").focus();
+    cacherFiche();
+    if (S.accueilActif) construireAccueil();
+  });
+  $("#reglages-ok").focus();
 }
 
 $("#btn-nouvelle").addEventListener("click", () => { R.message = null; menu(); });
+$("#btn-reglages").addEventListener("click", reglages);
 $("#btn-quitter").addEventListener("click", confirmerQuitter);
-{ const r = lireReglages(); if (r.mode) S.mode = r.mode; if (r.niveau) S.niveau = r.version >= 2 || r.niveau !== "malin" ? r.niveau : "expert"; if (r.cible) S.cible = r.cible; if (r.voix) S.voix = r.voix; S.rapide = !!r.rapide; }
+{ const r = lireReglages(); if (r.mode) S.mode = r.mode; S.niveau = "expert"; if (r.cible) S.cible = r.cible; if (r.voix) S.voix = r.voix; S.rapide = !!r.rapide; }
 render();
 menu();
 
