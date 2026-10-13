@@ -60,6 +60,11 @@ button { font: inherit; color: inherit; }
 .accueil[hidden] { display: none; }
 .carte-accueil { width: min(380px, 100%); display: grid; gap: 10px; padding: 18px; border-radius: 16px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); box-shadow: 0 10px 30px #0006; }
 .carte-accueil h2 { font: 700 26px/1 var(--font-titre); margin: 0; }
+.entete-accueil { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.langues { display: flex; gap: 4px; }
+.langue { font: inherit; font-size: 12px; font-weight: 600; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; }
+.langue[aria-pressed="true"] { background: var(--or); border-color: var(--or); color: var(--or-fg); }
+.langue:focus-visible { outline: 3px solid var(--or); outline-offset: 2px; }
 .carte-accueil .segment { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .carte-accueil .segment legend { grid-column: 1 / -1; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 0; margin-bottom: 4px; }
 .option { position: relative; display: block; }
@@ -149,7 +154,7 @@ button { font: inherit; color: inherit; }
 .journal li { color: var(--muted); }
 .journal li:first-child { color: var(--fg); font-weight: 600; }
 details summary { cursor: pointer; font-weight: 600; }
-details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+details p, .regles p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 
 .voile { position: fixed; inset: 0; background: #000a; display: grid; place-items: center; padding: 16px; z-index: 10; overflow: auto; }
 .voile[hidden] { display: none; }
@@ -238,22 +243,19 @@ details p { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
     </section>
     <aside class="cote">
       <section class="panneau" id="visio" hidden>
-        <h2>Voix et vidéo</h2>
-        <p class="message">Votre vignette est à côté de votre nom, sur la table : le micro et la caméra s'y activent.</p>
+        <h2 id="t-visio-titre">Voix et vidéo</h2>
+        <p class="message" id="t-visio-aide">Votre vignette est à côté de votre nom, sur la table : le micro et la caméra s'y activent.</p>
         <button class="btn or" type="button" id="btn-son" hidden>Activer le son des autres joueurs</button>
         <p class="message" id="msg-media" aria-live="polite"></p>
       </section>
       <section class="panneau">
-        <h2>Journal</h2>
+        <h2 id="t-journal">Journal</h2>
         <ul class="journal" id="journal"></ul>
       </section>
       <section class="panneau">
         <details>
-          <summary>Rappel des règles</summary>
-          <p><b>Valeurs à l'atout :</b> Valet 20, 9 14, As 11, 10 10, Roi 4, Dame 3. <b>Hors atout :</b> As 11, 10 10, Roi 4, Dame 3, Valet 2. Dix de der +10, belote-rebelote +20.</p>
-          <p><b>Jeu :</b> fournir la couleur demandée ; sinon couper (sauf si votre partenaire est maître) en montant si possible.</p>
-          <p><b>Appels :</b> en défaussant hors atout, une carte forte (10, Roi, Dame) dans une couleur demande à votre partenaire de la rejouer ; une faible (7, 8) la refuse. Les bots experts suivent cette convention, avec vous comme entre eux.</p>
-          <p><b>Belote contrat :</b> le preneur doit marquer plus que ses adversaires. <b>Coinche :</b> contrat de 80 à 160 ou capot ; on peut coincher (×2) puis surcoincher (×4).</p>
+          <summary id="t-regles">Rappel des règles</summary>
+          <div id="t-regles-corps" class="regles"></div>
         </details>
       </section>
     </aside>
@@ -282,7 +284,6 @@ const CAPOT = 250, TOTAL = 162, DIX_DE_DER = 10, BONUS_BELOTE = 20, BONUS_CAPOT 
 
 const k = (c) => c.v + "|" + c.c;
 const has = (arr, c) => arr.some((x) => x.v === c.v && x.c === c.c);
-const nomContrat = (v) => (v === CAPOT ? "Capot" : String(v));
 const pts = (c, atout) => (c.c === atout ? PT_ATOUT : PT_PLAIN)[c.v];
 const force = (c, atout, dem) => (c.c === atout ? 100 + ORD_ATOUT.indexOf(c.v) : c.c === dem ? ORD_PLAIN.indexOf(c.v) : -1);
 
@@ -660,38 +661,407 @@ const S = {
   scores: [0, 0], donneur: 0, mains: [[], [], [], []], pli: [], vus: [], atout: null, preneur: null,
   contrat: null, mult: 1, retournee: null, tour: null, gagnant: null, bulles: {}, journal: [],
   partieId: 0, attenteCarte: null, enchereCourante: null, voix: "fr",
+  langue: "fr", voixActive: true, // langue de l'interface et des annonces ; voix = langue si voixActive, sinon "off"
   moi: 0, sieges: ["local", "bot", "bot", "bot"], noms: [null, null, null, null], pilote: null, sansDelai: false,
   accueilActif: false, // première page affichée sur la table
   lieu: "ligne",      // "ligne" (par défaut) ou "bots"
-  avis: null, // { txt, jusqua } : message affiché un moment sur le tapis (joueur parti...)
+  avis: null, // { k, a, jusqua } : message affiché un moment sur le tapis (joueur parti...)
   plisGagnes: [0, 0, 0, 0], // plis ramassés par chaque joueur dans la donne
 };
 /* Perspective : S.moi est la place de ce navigateur ; sieges[q] vaut "local", "distant" (autre humain) ou "bot". */
 const rel = (q) => (q - S.moi + 4) % 4;
-const nom = (q) => S.noms[q] || ["Vous", "Ouest", "Partenaire", "Est"][rel(q)];
+const nom = (q) => S.noms[q] || t("sieges")[rel(q)];
 const N = (q) => `§${q}§`; // marqueur de nom : résolu à l'affichage, chacun voit les noms de son point de vue
 const fmt = (s) => String(s).replace(/§(\d)§/g, (_, q) => nom(Number(q)));
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const propre = (s) => (String(s || "").replace(/[<>&"'`§]/g, "").trim().slice(0, 16) || "Joueur");
 const ANNULE = { annule: true };
 
+/* ===================== Traductions de l'interface (français, anglais, espagnol, japonais) ===================== */
+const I18N = {
+  fr: {
+    nouvelle_partie: "Nouvelle partie", reglages: "Réglages", quitter_partie: "Quitter la partie",
+    nous: "Nous", eux: "Eux", objectif: (n) => `objectif ${n}`,
+    visio_titre: "Voix et vidéo",
+    visio_aide: "Votre vignette est à côté de votre nom, sur la table : le micro et la caméra s'y activent.",
+    btn_son: "Activer le son des autres joueurs",
+    journal: "Journal", regles: "Rappel des règles",
+    regles_html: `<p><b>Valeurs à l'atout :</b> Valet 20, 9 14, As 11, 10 10, Roi 4, Dame 3. <b>Hors atout :</b> As 11, 10 10, Roi 4, Dame 3, Valet 2. Dix de der +10, belote-rebelote +20.</p>
+<p><b>Jeu :</b> fournir la couleur demandée ; sinon couper (sauf si votre partenaire est maître) en montant si possible.</p>
+<p><b>Appels :</b> en défaussant hors atout, une carte forte (10, Roi, Dame) dans une couleur demande à votre partenaire de la rejouer ; une faible (7, 8) la refuse. Les bots experts suivent cette convention, avec vous comme entre eux.</p>
+<p><b>Belote contrat :</b> le preneur doit marquer plus que ses adversaires. <b>Coinche :</b> contrat de 80 à 160 ou capot ; on peut coincher (×2) puis surcoincher (×4).</p>`,
+    table_aria: "Table de jeu", main_aria: "Votre main",
+    sieges: ["Vous", "Ouest", "Partenaire", "Est"],
+    donneur: "Donneur",
+    pile_titre: (n) => `Plis gagnés : ${n}`, pile_aria: (n) => `${n} pli${n > 1 ? "s" : ""} gagné${n > 1 ? "s" : ""}`,
+    c_enchere: "Enchère", c_par: (n) => `par ${n}`, c_atout: (s) => `Atout ${s}`, c_contrat: (v) => `Contrat ${v}`,
+    c_preneur: (n) => `Preneur : ${n}`, c_coinche: "Coinché ×2", c_surcoinche: "Surcoinché ×4", c_retournee: "Retournée",
+    capot: "Capot",
+    belote: "Belote !", rebelote: "Rebelote !", toast: (n, t) => `${n} : ${t}`,
+    b_passe: "Passe", b_prend: (s) => `Prend à ${s}`, b_coinche: "Coinche !", b_surcoinche: "Surcoinche !",
+    passer: "Passer", prise1_q: "Prendre à la couleur retournée ?", prise1_btn: (s) => `Prendre à ${s}`,
+    prise2_q: "Choisir un atout ?", enchere_q: "Votre enchère", a_vous: "À vous de jouer",
+    coinche_q: (n, v, s) => `${n} a pris ${v} ${s}. Coincher ?`, coinche_btn: "Coincher (×2)", laisser: "Laisser",
+    surcoinche_q: "Vous êtes coinchés. Surcoincher ?", surcoinche_btn: "Surcoincher (×4)",
+    log_donne: (n) => `Nouvelle donne. Donneur : ${n}.`,
+    log_prend: (n, s, c) => `${n} prend à ${s} ${c}.`, log_passe: (n) => `${n} passe.`,
+    log_annonce: (n, v, s) => `${n} annonce ${v} ${s}.`, log_coinche: (n) => `${n} coinche !`, log_surcoinche: (n) => `${n} surcoinche !`,
+    log_nul_encherit: "Personne n'enchérit : on redistribue.", log_nul_prend: "Personne ne prend : on redistribue.",
+    log_pli: (i, n, g) => `Pli ${i} : ${n} (+${g})`,
+    avis_quitte: (n) => `${n} a quitté la partie. Un bot prend sa place.`,
+    avis_deconnecte: (n) => `${n} a été déconnecté. Un bot prend sa place.`,
+    avis_revenu: (n) => `${n} est revenu dans la partie.`,
+    bilan_titre: "Fin de la donne", pris_par: (c, n, v) => `${c}, pris par ${n}. ${v}.`,
+    verdict_ok: (e) => `Contrat rempli par ${e}`, verdict_ko: (e) => `Chute de ${e}`,
+    tab_plis: "Plis gagnés", tab_cartes: "Points des cartes (dix de der compris)", tab_belote: "Belote-rebelote", tab_marque: "Marqué",
+    donne_suivante: "Donne suivante", voir_resultat: "Voir le résultat",
+    egalite: "Égalité", victoire: "Victoire !", defaite: "Défaite", retour_salle: "Retour à la salle",
+    jeu: "Jeu", belote_contrat: "Belote contrat", coinche: "Coinche", jouer: "Jouer", en_ligne: "En ligne", contre_bots: "Contre les bots",
+    pseudo_ph: "Votre pseudo", revenir: (c) => `Revenir dans la salle ${c}`, creer: "Créer une salle", code_ph: "Code de la salle", rejoindre: "Rejoindre",
+    acc_aide: "De 2 à 4 joueurs, les places libres sont tenues par des bots. Si vous rejoignez une salle, le jeu est celui de l'hôte.",
+    resume: (n, v) => `${n} points · ${v}`,
+    voix_libelle: { fr: "voix françaises", en: "voix anglaises", es: "voix espagnoles", ja: "voix japonaises", off: "sans voix" },
+    reg_titre: "Réglages", reg_objectif: "Objectif", reg_500: "500 points (partie courte)", reg_1000: "1000 points",
+    reg_langue: "Langue et voix", reg_sans_voix: "Sans annonces vocales", reg_rapide: "Rythme rapide",
+    reg_note_bots: "Les bots sont toujours experts. Les changements s'appliquent à la prochaine partie.",
+    reg_note_client: "En ligne, le jeu et l'objectif sont ceux de l'hôte. Les changements s'appliquent à la prochaine partie.",
+    reg_ok: "Enregistrer",
+    salle_titre: "Salle en ligne", salle_aide: "Donnez ce code aux autres joueurs, ils le saisissent dans « Rejoindre ».",
+    salle_equipes: "Les deux places d'une même équipe sont face à face. Les places libres sont jouées par des bots.",
+    equipe_a: "Équipe A", equipe_b: "Équipe B", vous_suffixe: " (vous)", place_libre: "Bot · s'asseoir ici",
+    lancer: (n) => `Lancer la partie (${n} joueurs)`, attente_joueur: "En attente d'un autre joueur…", attente_hote: "En attente du lancement par l'hôte…",
+    media_note: "Micro et caméra sont facultatifs et passent directement entre les navigateurs des joueurs.",
+    quitter_salle: "Quitter la salle", micro: "Micro", camera: "Caméra", active: "activé",
+    q_titre: "Quitter la partie ?", q_hote: "Vous êtes l'hôte : la salle sera fermée pour tous les joueurs.",
+    q_client: "Les autres joueurs en seront informés et un bot prendra votre place.", q_oui: "Quitter", q_non: "Rester",
+    net_indispo: "Le jeu en ligne n'est pas disponible : les bibliothèques réseau n'ont pas pu être chargées.",
+    net_creation: "Création de la salle… (quelques secondes)",
+    net_sature: "Le service de salles ne répond pas (il est public et parfois saturé). Réessayez dans un instant.",
+    net_code5: "Le code de la salle comporte 5 caractères.", net_connexion: "Connexion à la salle… (quelques secondes)",
+    net_introuvable: "Salle introuvable : vérifiez le code.",
+    net_injoignable: "Impossible de joindre la salle (le service public est peut-être saturé). Réessayez dans un instant.",
+    net_perdue: "La connexion avec l'hôte est perdue.", net_noresp: "La salle ne répond pas. Vérifiez le code et réessayez.",
+    net_ferme: (n) => `${n} a quitté la partie : la salle est fermée.`, hote_defaut: "L'hôte",
+    refus_encours: "Une partie est déjà en cours dans cette salle. Seul un joueur parti peut y revenir.",
+    refus_pleine: "La salle est pleine.", refus_indispo: "La salle n'est plus disponible.",
+    net_quitte: "Vous avez quitté la partie. Vous pouvez y revenir tant qu'elle est en cours.",
+    med_indispo: "Ce navigateur ne permet pas d'utiliser le micro ou la caméra ici.",
+    med_refus_audio: "Accès au micro refusé ou indisponible.", med_refus_video: "Accès à la caméra refusé ou indisponible.",
+    med_allege: "Connexion directe impossible : voix et vidéo passent en mode allégé (qualité réduite).",
+    vignette_de: (n) => `Vignette de ${n}`, cam_eteinte: "Caméra éteinte",
+    media_on: (n) => `${n} activé : cliquer pour couper`, media_off: (n) => `${n} éteint : cliquer pour activer`,
+    carte_aria: (v, c) => `${v} de ${c}`,
+    valeurs: { "7": "7", "8": "8", "9": "9", "10": "10", Valet: "Valet", Dame: "Dame", Roi: "Roi", As: "As" },
+    abrege: { "7": "7", "8": "8", "9": "9", "10": "10", Valet: "V", Dame: "D", Roi: "R", As: "A" },
+    couleurs: { Coeur: "cœur", Carreau: "carreau", Trefle: "trèfle", Pique: "pique" },
+  },
+  en: {
+    nouvelle_partie: "New game", reglages: "Settings", quitter_partie: "Leave game",
+    nous: "Us", eux: "Them", objectif: (n) => `target ${n}`,
+    visio_titre: "Voice and video",
+    visio_aide: "Your thumbnail is next to your name on the table: use it to turn the mic and camera on.",
+    btn_son: "Turn on other players' sound",
+    journal: "Log", regles: "Rules reminder",
+    regles_html: `<p><b>Trump values:</b> Jack 20, 9 14, Ace 11, 10 10, King 4, Queen 3. <b>Other suits:</b> Ace 11, 10 10, King 4, Queen 3, Jack 2. Last trick +10, belote-rebelote +20.</p>
+<p><b>Play:</b> follow the suit led; otherwise trump (unless your partner is winning), going higher if you can.</p>
+<p><b>Signals:</b> when discarding off-trump, a strong card (10, King, Queen) in a suit asks your partner to lead it back; a weak one (7, 8) refuses it. Expert bots follow this convention, with you and among themselves.</p>
+<p><b>Contract belote:</b> the taker must score more than the opponents. <b>Coinche:</b> contract from 80 to 160 or capot; you can double (×2) then redouble (×4).</p>`,
+    table_aria: "Card table", main_aria: "Your hand",
+    sieges: ["You", "West", "Partner", "East"],
+    donneur: "Dealer",
+    pile_titre: (n) => `Tricks won: ${n}`, pile_aria: (n) => `${n} trick${n > 1 ? "s" : ""} won`,
+    c_enchere: "Bid", c_par: (n) => `by ${n}`, c_atout: (s) => `Trump ${s}`, c_contrat: (v) => `Contract ${v}`,
+    c_preneur: (n) => `Taker: ${n}`, c_coinche: "Coinched ×2", c_surcoinche: "Surcoinched ×4", c_retournee: "Turned up",
+    capot: "Capot",
+    belote: "Belote!", rebelote: "Rebelote!", toast: (n, t) => `${n}: ${t}`,
+    b_passe: "Pass", b_prend: (s) => `Takes ${s}`, b_coinche: "Coinche!", b_surcoinche: "Surcoinche!",
+    passer: "Pass", prise1_q: "Take the turned-up suit?", prise1_btn: (s) => `Take ${s}`,
+    prise2_q: "Choose a trump suit?", enchere_q: "Your bid", a_vous: "Your turn",
+    coinche_q: (n, v, s) => `${n} took ${v} ${s}. Coinche?`, coinche_btn: "Coinche (×2)", laisser: "Let it go",
+    surcoinche_q: "You have been coinched. Surcoinche?", surcoinche_btn: "Surcoinche (×4)",
+    log_donne: (n) => `New deal. Dealer: ${n}.`,
+    log_prend: (n, s, c) => `${n} takes ${s} ${c}.`, log_passe: (n) => `${n} passes.`,
+    log_annonce: (n, v, s) => `${n} bids ${v} ${s}.`, log_coinche: (n) => `${n} coinches!`, log_surcoinche: (n) => `${n} surcoinches!`,
+    log_nul_encherit: "Nobody bids: redeal.", log_nul_prend: "Nobody takes: redeal.",
+    log_pli: (i, n, g) => `Trick ${i}: ${n} (+${g})`,
+    avis_quitte: (n) => `${n} left the game. A bot takes the seat.`,
+    avis_deconnecte: (n) => `${n} was disconnected. A bot takes the seat.`,
+    avis_revenu: (n) => `${n} is back in the game.`,
+    bilan_titre: "End of the deal", pris_par: (c, n, v) => `${c}, taken by ${n}. ${v}.`,
+    verdict_ok: (e) => `Contract made by ${e}`, verdict_ko: (e) => `Contract failed by ${e}`,
+    tab_plis: "Tricks won", tab_cartes: "Card points (last trick included)", tab_belote: "Belote-rebelote", tab_marque: "Scored",
+    donne_suivante: "Next deal", voir_resultat: "See the result",
+    egalite: "Draw", victoire: "Victory!", defaite: "Defeat", retour_salle: "Back to the room",
+    jeu: "Game", belote_contrat: "Contract belote", coinche: "Coinche", jouer: "Play", en_ligne: "Online", contre_bots: "Against bots",
+    pseudo_ph: "Your nickname", revenir: (c) => `Back to room ${c}`, creer: "Create a room", code_ph: "Room code", rejoindre: "Join",
+    acc_aide: "2 to 4 players; empty seats are played by bots. If you join a room, the game is the host's.",
+    resume: (n, v) => `${n} points · ${v}`,
+    voix_libelle: { fr: "French voices", en: "English voices", es: "Spanish voices", ja: "Japanese voices", off: "no voice" },
+    reg_titre: "Settings", reg_objectif: "Target", reg_500: "500 points (short game)", reg_1000: "1000 points",
+    reg_langue: "Language and voice", reg_sans_voix: "No spoken announcements", reg_rapide: "Fast pace",
+    reg_note_bots: "Bots are always experts. Changes apply to the next game.",
+    reg_note_client: "Online, the game and target are the host's. Changes apply to the next game.",
+    reg_ok: "Save",
+    salle_titre: "Online room", salle_aide: "Give this code to the other players; they enter it under “Join”.",
+    salle_equipes: "The two seats of a team face each other. Empty seats are played by bots.",
+    equipe_a: "Team A", equipe_b: "Team B", vous_suffixe: " (you)", place_libre: "Bot · sit here",
+    lancer: (n) => `Start the game (${n} players)`, attente_joueur: "Waiting for another player…", attente_hote: "Waiting for the host to start…",
+    media_note: "Mic and camera are optional and go directly between the players' browsers.",
+    quitter_salle: "Leave the room", micro: "Mic", camera: "Camera", active: "on",
+    q_titre: "Leave the game?", q_hote: "You are the host: the room will be closed for all players.",
+    q_client: "The other players will be told and a bot will take your seat.", q_oui: "Leave", q_non: "Stay",
+    net_indispo: "Online play is not available: the network libraries could not be loaded.",
+    net_creation: "Creating the room… (a few seconds)",
+    net_sature: "The room service is not answering (it is public and sometimes overloaded). Please try again in a moment.",
+    net_code5: "The room code has 5 characters.", net_connexion: "Connecting to the room… (a few seconds)",
+    net_introuvable: "Room not found: check the code.",
+    net_injoignable: "Cannot reach the room (the public service may be overloaded). Please try again in a moment.",
+    net_perdue: "The connection with the host is lost.", net_noresp: "The room is not answering. Check the code and try again.",
+    net_ferme: (n) => `${n} left the game: the room is closed.`, hote_defaut: "The host",
+    refus_encours: "A game is already in progress in this room. Only a player who left can come back.",
+    refus_pleine: "The room is full.", refus_indispo: "The room is no longer available.",
+    net_quitte: "You left the game. You can come back while it is still in progress.",
+    med_indispo: "This browser does not allow the mic or camera here.",
+    med_refus_audio: "Microphone access denied or unavailable.", med_refus_video: "Camera access denied or unavailable.",
+    med_allege: "Direct connection impossible: voice and video switch to light mode (reduced quality).",
+    vignette_de: (n) => `${n}'s thumbnail`, cam_eteinte: "Camera off",
+    media_on: (n) => `${n} on: click to turn off`, media_off: (n) => `${n} off: click to turn on`,
+    carte_aria: (v, c) => `${v} of ${c}`,
+    valeurs: { "7": "7", "8": "8", "9": "9", "10": "10", Valet: "Jack", Dame: "Queen", Roi: "King", As: "Ace" },
+    abrege: { "7": "7", "8": "8", "9": "9", "10": "10", Valet: "J", Dame: "Q", Roi: "K", As: "A" },
+    couleurs: { Coeur: "hearts", Carreau: "diamonds", Trefle: "clubs", Pique: "spades" },
+  },
+  es: {
+    nouvelle_partie: "Nueva partida", reglages: "Ajustes", quitter_partie: "Salir de la partida",
+    nous: "Nosotros", eux: "Ellos", objectif: (n) => `objetivo ${n}`,
+    visio_titre: "Voz y vídeo",
+    visio_aide: "Su miniatura está junto a su nombre en la mesa: ahí se activan el micrófono y la cámara.",
+    btn_son: "Activar el sonido de los demás jugadores",
+    journal: "Registro", regles: "Recordatorio de reglas",
+    regles_html: `<p><b>Valores del triunfo:</b> Jota 20, 9 14, As 11, 10 10, Rey 4, Reina 3. <b>Otros palos:</b> As 11, 10 10, Rey 4, Reina 3, Jota 2. Última baza +10, belote-rebelote +20.</p>
+<p><b>Juego:</b> servir el palo pedido; si no, fallar (salvo que su compañero vaya ganando), subiendo si es posible.</p>
+<p><b>Señales:</b> al descartar fuera del triunfo, una carta alta (10, Rey, Reina) en un palo pide a su compañero que lo vuelva a jugar; una baja (7, 8) lo rechaza. Los bots expertos siguen esta convención, con usted y entre ellos.</p>
+<p><b>Belote de contrato:</b> el que toma debe sumar más que los adversarios. <b>Coinche:</b> contrato de 80 a 160 o capot; se puede coinchar (×2) y sobrecoinchar (×4).</p>`,
+    table_aria: "Mesa de juego", main_aria: "Su mano",
+    sieges: ["Usted", "Oeste", "Compañero", "Este"],
+    donneur: "Reparte",
+    pile_titre: (n) => `Bazas ganadas: ${n}`, pile_aria: (n) => `${n} baza${n > 1 ? "s" : ""} ganada${n > 1 ? "s" : ""}`,
+    c_enchere: "Puja", c_par: (n) => `de ${n}`, c_atout: (s) => `Triunfo ${s}`, c_contrat: (v) => `Contrato ${v}`,
+    c_preneur: (n) => `Toma: ${n}`, c_coinche: "Coinchado ×2", c_surcoinche: "Sobrecoinchado ×4", c_retournee: "Carta vista",
+    capot: "Capot",
+    belote: "¡Belote!", rebelote: "¡Rebelote!", toast: (n, t) => `${n}: ${t}`,
+    b_passe: "Paso", b_prend: (s) => `Toma ${s}`, b_coinche: "¡Coinche!", b_surcoinche: "¡Sobrecoinche!",
+    passer: "Pasar", prise1_q: "¿Tomar el palo de la carta vista?", prise1_btn: (s) => `Tomar ${s}`,
+    prise2_q: "¿Elegir un triunfo?", enchere_q: "Su puja", a_vous: "Su turno",
+    coinche_q: (n, v, s) => `${n} tomó ${v} ${s}. ¿Coinchar?`, coinche_btn: "Coinchar (×2)", laisser: "Dejar",
+    surcoinche_q: "Le han coinchado. ¿Sobrecoinchar?", surcoinche_btn: "Sobrecoinchar (×4)",
+    log_donne: (n) => `Nueva mano. Reparte: ${n}.`,
+    log_prend: (n, s, c) => `${n} toma ${s} ${c}.`, log_passe: (n) => `${n} pasa.`,
+    log_annonce: (n, v, s) => `${n} puja ${v} ${s}.`, log_coinche: (n) => `¡${n} coincha!`, log_surcoinche: (n) => `¡${n} sobrecoincha!`,
+    log_nul_encherit: "Nadie puja: se reparte de nuevo.", log_nul_prend: "Nadie toma: se reparte de nuevo.",
+    log_pli: (i, n, g) => `Baza ${i}: ${n} (+${g})`,
+    avis_quitte: (n) => `${n} ha salido de la partida. Un bot ocupa su lugar.`,
+    avis_deconnecte: (n) => `${n} se ha desconectado. Un bot ocupa su lugar.`,
+    avis_revenu: (n) => `${n} ha vuelto a la partida.`,
+    bilan_titre: "Fin de la mano", pris_par: (c, n, v) => `${c}, tomado por ${n}. ${v}.`,
+    verdict_ok: (e) => `Contrato cumplido por ${e}`, verdict_ko: (e) => `Contrato fallido por ${e}`,
+    tab_plis: "Bazas ganadas", tab_cartes: "Puntos de cartas (última baza incluida)", tab_belote: "Belote-rebelote", tab_marque: "Puntuación",
+    donne_suivante: "Siguiente mano", voir_resultat: "Ver el resultado",
+    egalite: "Empate", victoire: "¡Victoria!", defaite: "Derrota", retour_salle: "Volver a la sala",
+    jeu: "Juego", belote_contrat: "Belote de contrato", coinche: "Coinche", jouer: "Jugar", en_ligne: "En línea", contre_bots: "Contra bots",
+    pseudo_ph: "Su apodo", revenir: (c) => `Volver a la sala ${c}`, creer: "Crear una sala", code_ph: "Código de la sala", rejoindre: "Unirse",
+    acc_aide: "De 2 a 4 jugadores; los puestos libres los ocupan bots. Si se une a una sala, el juego es el del anfitrión.",
+    resume: (n, v) => `${n} puntos · ${v}`,
+    voix_libelle: { fr: "voces en francés", en: "voces en inglés", es: "voces en español", ja: "voces en japonés", off: "sin voz" },
+    reg_titre: "Ajustes", reg_objectif: "Objetivo", reg_500: "500 puntos (partida corta)", reg_1000: "1000 puntos",
+    reg_langue: "Idioma y voz", reg_sans_voix: "Sin anuncios hablados", reg_rapide: "Ritmo rápido",
+    reg_note_bots: "Los bots siempre son expertos. Los cambios se aplican en la próxima partida.",
+    reg_note_client: "En línea, el juego y el objetivo son los del anfitrión. Los cambios se aplican en la próxima partida.",
+    reg_ok: "Guardar",
+    salle_titre: "Sala en línea", salle_aide: "Dé este código a los demás jugadores; lo introducen en «Unirse».",
+    salle_equipes: "Los dos puestos de un equipo están frente a frente. Los puestos libres los juegan bots.",
+    equipe_a: "Equipo A", equipe_b: "Equipo B", vous_suffixe: " (usted)", place_libre: "Bot · sentarse aquí",
+    lancer: (n) => `Empezar la partida (${n} jugadores)`, attente_joueur: "Esperando a otro jugador…", attente_hote: "Esperando a que el anfitrión empiece…",
+    media_note: "El micrófono y la cámara son opcionales y pasan directamente entre los navegadores de los jugadores.",
+    quitter_salle: "Salir de la sala", micro: "Micrófono", camera: "Cámara", active: "activado",
+    q_titre: "¿Salir de la partida?", q_hote: "Usted es el anfitrión: la sala se cerrará para todos los jugadores.",
+    q_client: "Se informará a los demás jugadores y un bot ocupará su lugar.", q_oui: "Salir", q_non: "Quedarse",
+    net_indispo: "El juego en línea no está disponible: no se pudieron cargar las bibliotecas de red.",
+    net_creation: "Creando la sala… (unos segundos)",
+    net_sature: "El servicio de salas no responde (es público y a veces está saturado). Inténtelo de nuevo en un momento.",
+    net_code5: "El código de la sala tiene 5 caracteres.", net_connexion: "Conectando con la sala… (unos segundos)",
+    net_introuvable: "Sala no encontrada: compruebe el código.",
+    net_injoignable: "No se puede acceder a la sala (el servicio público puede estar saturado). Inténtelo de nuevo en un momento.",
+    net_perdue: "Se ha perdido la conexión con el anfitrión.", net_noresp: "La sala no responde. Compruebe el código e inténtelo de nuevo.",
+    net_ferme: (n) => `${n} ha salido de la partida: la sala está cerrada.`, hote_defaut: "El anfitrión",
+    refus_encours: "Ya hay una partida en curso en esta sala. Solo puede volver un jugador que se fue.",
+    refus_pleine: "La sala está llena.", refus_indispo: "La sala ya no está disponible.",
+    net_quitte: "Ha salido de la partida. Puede volver mientras siga en curso.",
+    med_indispo: "Este navegador no permite usar el micrófono o la cámara aquí.",
+    med_refus_audio: "Acceso al micrófono denegado o no disponible.", med_refus_video: "Acceso a la cámara denegado o no disponible.",
+    med_allege: "Conexión directa imposible: la voz y el vídeo pasan a modo ligero (calidad reducida).",
+    vignette_de: (n) => `Miniatura de ${n}`, cam_eteinte: "Cámara apagada",
+    media_on: (n) => `${n} activado: clic para apagar`, media_off: (n) => `${n} apagado: clic para activar`,
+    carte_aria: (v, c) => `${v} de ${c}`,
+    valeurs: { "7": "7", "8": "8", "9": "9", "10": "10", Valet: "Jota", Dame: "Reina", Roi: "Rey", As: "As" },
+    abrege: { "7": "7", "8": "8", "9": "9", "10": "10", Valet: "J", Dame: "Q", Roi: "K", As: "A" },
+    couleurs: { Coeur: "corazones", Carreau: "diamantes", Trefle: "tréboles", Pique: "picas" },
+  },
+  ja: {
+    nouvelle_partie: "新しいゲーム", reglages: "設定", quitter_partie: "ゲームを退出",
+    nous: "自分たち", eux: "相手", objectif: (n) => `目標 ${n}`,
+    visio_titre: "音声とビデオ",
+    visio_aide: "あなたのサムネイルはテーブルの名前の横にあります。マイクとカメラはそこで切り替えます。",
+    btn_son: "他のプレイヤーの音声をオンにする",
+    journal: "ログ", regles: "ルールの確認",
+    regles_html: `<p><b>切り札の点:</b> J 20、9 14、A 11、10 10、K 4、Q 3。<b>それ以外:</b> A 11、10 10、K 4、Q 3、J 2。最後のトリック +10、ベロット・リベロット +20。</p>
+<p><b>プレイ:</b> 出されたスートに従います。なければ切り札を出します（パートナーが勝っている場合を除く）。可能なら強い切り札で上回ります。</p>
+<p><b>合図:</b> 切り札以外を捨てるとき、強いカード（10、K、Q）はそのスートを返してほしいという合図、弱いカード（7、8）は断りの合図です。エキスパートのボットはこの約束事に従います。</p>
+<p><b>契約ベロット:</b> 取った側は相手より多く得点する必要があります。<b>コアンシュ:</b> 80〜160またはカポの契約。コアンシュ（×2）、シュルコアンシュ（×4）ができます。</p>`,
+    table_aria: "ゲームテーブル", main_aria: "あなたの手札",
+    sieges: ["あなた", "西", "パートナー", "東"],
+    donneur: "親",
+    pile_titre: (n) => `取ったトリック: ${n}`, pile_aria: (n) => `${n}トリック獲得`,
+    c_enchere: "ビッド", c_par: (n) => `${n}`, c_atout: (s) => `切り札 ${s}`, c_contrat: (v) => `契約 ${v}`,
+    c_preneur: (n) => `取った人: ${n}`, c_coinche: "コアンシュ ×2", c_surcoinche: "シュルコアンシュ ×4", c_retournee: "めくり札",
+    capot: "カポ",
+    belote: "ベロット！", rebelote: "リベロット！", toast: (n, t) => `${n}：${t}`,
+    b_passe: "パス", b_prend: (s) => `${s}で取る`, b_coinche: "コアンシュ！", b_surcoinche: "シュルコアンシュ！",
+    passer: "パス", prise1_q: "めくり札のスートで取りますか？", prise1_btn: (s) => `${s}で取る`,
+    prise2_q: "切り札を選びますか？", enchere_q: "あなたのビッド", a_vous: "あなたの番です",
+    coinche_q: (n, v, s) => `${n}が${v} ${s}を取りました。コアンシュしますか？`, coinche_btn: "コアンシュ (×2)", laisser: "見送る",
+    surcoinche_q: "コアンシュされました。シュルコアンシュしますか？", surcoinche_btn: "シュルコアンシュ (×4)",
+    log_donne: (n) => `新しい配札。親：${n}`,
+    log_prend: (n, s, c) => `${n}は${s} ${c}で取りました。`, log_passe: (n) => `${n}はパスしました。`,
+    log_annonce: (n, v, s) => `${n}が${v} ${s}をビッドしました。`, log_coinche: (n) => `${n}がコアンシュ！`, log_surcoinche: (n) => `${n}がシュルコアンシュ！`,
+    log_nul_encherit: "誰もビッドしませんでした。配り直します。", log_nul_prend: "誰も取りませんでした。配り直します。",
+    log_pli: (i, n, g) => `トリック${i}：${n}（+${g}）`,
+    avis_quitte: (n) => `${n}がゲームを退出しました。ボットが代わりに入ります。`,
+    avis_deconnecte: (n) => `${n}の接続が切れました。ボットが代わりに入ります。`,
+    avis_revenu: (n) => `${n}がゲームに戻りました。`,
+    bilan_titre: "ディール終了", pris_par: (c, n, v) => `${c}、${n}が取りました。${v}。`,
+    verdict_ok: (e) => `契約成功：${e}`, verdict_ko: (e) => `契約失敗：${e}`,
+    tab_plis: "取ったトリック", tab_cartes: "カード点（最後のトリック込み）", tab_belote: "ベロット・リベロット", tab_marque: "得点",
+    donne_suivante: "次のディール", voir_resultat: "結果を見る",
+    egalite: "引き分け", victoire: "勝利！", defaite: "敗北", retour_salle: "ルームに戻る",
+    jeu: "ゲーム", belote_contrat: "契約ベロット", coinche: "コアンシュ", jouer: "プレイ", en_ligne: "オンライン", contre_bots: "ボットと対戦",
+    pseudo_ph: "ニックネーム", revenir: (c) => `ルーム${c}に戻る`, creer: "ルームを作る", code_ph: "ルームコード", rejoindre: "参加",
+    acc_aide: "2〜4人で遊べます。空席はボットが担当します。ルームに参加する場合、ゲームはホストの設定になります。",
+    resume: (n, v) => `${n}点 · ${v}`,
+    voix_libelle: { fr: "フランス語の音声", en: "英語の音声", es: "スペイン語の音声", ja: "日本語の音声", off: "音声なし" },
+    reg_titre: "設定", reg_objectif: "目標", reg_500: "500点（短いゲーム）", reg_1000: "1000点",
+    reg_langue: "言語と音声", reg_sans_voix: "音声アナウンスなし", reg_rapide: "速いテンポ",
+    reg_note_bots: "ボットは常にエキスパートです。変更は次のゲームから適用されます。",
+    reg_note_client: "オンラインでは、ゲームと目標はホストの設定です。変更は次のゲームから適用されます。",
+    reg_ok: "保存",
+    salle_titre: "オンラインルーム", salle_aide: "このコードを他のプレイヤーに伝えてください。「参加」に入力してもらいます。",
+    salle_equipes: "同じチームの2席は向かい合っています。空席はボットが担当します。",
+    equipe_a: "チームA", equipe_b: "チームB", vous_suffixe: "（あなた）", place_libre: "ボット · ここに座る",
+    lancer: (n) => `ゲーム開始（${n}人）`, attente_joueur: "他のプレイヤーを待っています…", attente_hote: "ホストの開始を待っています…",
+    media_note: "マイクとカメラは任意で、プレイヤーのブラウザ間で直接やり取りされます。",
+    quitter_salle: "ルームを退出", micro: "マイク", camera: "カメラ", active: "オン",
+    q_titre: "ゲームを退出しますか？", q_hote: "あなたはホストです。全員のルームが閉じられます。",
+    q_client: "他のプレイヤーに通知され、ボットがあなたの席に入ります。", q_oui: "退出", q_non: "残る",
+    net_indispo: "オンラインプレイは利用できません。ネットワークライブラリを読み込めませんでした。",
+    net_creation: "ルームを作成中…（数秒）",
+    net_sature: "ルームサービスが応答しません（公開サービスのため混雑することがあります）。しばらくしてからもう一度お試しください。",
+    net_code5: "ルームコードは5文字です。", net_connexion: "ルームに接続中…（数秒）",
+    net_introuvable: "ルームが見つかりません。コードを確認してください。",
+    net_injoignable: "ルームに接続できません（公開サービスが混雑している可能性があります）。しばらくしてからもう一度お試しください。",
+    net_perdue: "ホストとの接続が切れました。", net_noresp: "ルームが応答しません。コードを確認してもう一度お試しください。",
+    net_ferme: (n) => `${n}がゲームを退出しました。ルームは閉じられました。`, hote_defaut: "ホスト",
+    refus_encours: "このルームではすでにゲームが進行中です。退出したプレイヤーだけが戻れます。",
+    refus_pleine: "ルームは満員です。", refus_indispo: "このルームは利用できなくなりました。",
+    net_quitte: "ゲームを退出しました。進行中は戻ることができます。",
+    med_indispo: "このブラウザではここでマイクやカメラを使えません。",
+    med_refus_audio: "マイクへのアクセスが拒否されたか、利用できません。", med_refus_video: "カメラへのアクセスが拒否されたか、利用できません。",
+    med_allege: "直接接続できません。音声とビデオは軽量モード（画質低下）に切り替わります。",
+    vignette_de: (n) => `${n}のサムネイル`, cam_eteinte: "カメラオフ",
+    media_on: (n) => `${n}オン：クリックでオフ`, media_off: (n) => `${n}オフ：クリックでオン`,
+    carte_aria: (v, c) => `${c}の${v}`,
+    valeurs: { "7": "7", "8": "8", "9": "9", "10": "10", Valet: "J", Dame: "Q", Roi: "K", As: "A" },
+    abrege: { "7": "7", "8": "8", "9": "9", "10": "10", Valet: "J", Dame: "Q", Roi: "K", As: "A" },
+    couleurs: { Coeur: "ハート", Carreau: "ダイヤ", Trefle: "クラブ", Pique: "スペード" },
+  },
+};
+
+const LANGUES_UI = ["fr", "en", "es", "ja"];
+const langue = () => (I18N[S.langue] ? S.langue : "fr");
+/* t("clé", ...args) : texte de l'interface dans la langue choisie. */
+function t(k, ...a) {
+  let v = I18N[langue()][k];
+  if (v === undefined) v = I18N.fr[k];
+  return typeof v === "function" ? v(...a) : v;
+}
+const cn = (c) => I18N[langue()].couleurs[c];       // nom d'une couleur
+const vn = (v) => I18N[langue()].valeurs[v];        // nom d'une valeur
+const abr = (v) => I18N[langue()].abrege[v];        // abréviation sur les cartes
+const nomContrat = (v) => (v === CAPOT ? t("capot") : String(v));
+/* Message structuré : { k, a }. Les arguments {q} (siège), {c} (couleur), {s} (symbole), {v} (valeur de contrat)
+   sont résolus à l'affichage, chacun voit donc le texte dans sa langue et avec ses propres noms. */
+const msg = (k, ...a) => ({ k, a });
+function txtMsg(m) {
+  if (typeof m === "string") return fmt(m);
+  const a = (m.a || []).map((x) => {
+    if (x && typeof x === "object") {
+      if ("q" in x) return nom(x.q);
+      if ("c" in x) return cn(x.c);
+      if ("s" in x) return SYM[x.s];
+      if ("v" in x) return nomContrat(x.v);
+      if ("k" in x) return t(x.k);
+    }
+    return x;
+  });
+  return t(m.k, ...a);
+}
+/* Le texte d'une bulle (au-dessus d'un joueur) : { k, a } avec symboles colorés. */
+function bulleHtml(b) {
+  if (!b) return "";
+  if (typeof b === "string") return b;
+  if (b.k === "b_prend") return t("b_prend", symHtml(b.a[0]));
+  if (b.k === "enchere") return `${nomContrat(b.a[0])} ${symHtml(b.a[1])}`;
+  return t(b.k);
+}
+function appliquerVoix() { S.voix = S.voixActive ? langue() : "off"; }
+function langueNavigateur() {
+  try { const l = String(navigator.language || "fr").slice(0, 2).toLowerCase(); return LANGUES_UI.includes(l) ? l : "fr"; } catch (e) { return "fr"; }
+}
+/* Textes écrits dans la page : mis à jour à chaque changement de langue. */
+function traduireStatique() {
+  const fixe = (id, txt) => { const el = document.querySelector(id); if (el) el.textContent = txt; };
+  if (document.documentElement) document.documentElement.lang = langue();
+  fixe("#btn-nouvelle", t("nouvelle_partie")); fixe("#btn-reglages", t("reglages")); fixe("#btn-quitter", t("quitter_partie"));
+  fixe("#t-visio-titre", t("visio_titre")); fixe("#t-visio-aide", t("visio_aide")); fixe("#btn-son", t("btn_son"));
+  fixe("#t-journal", t("journal")); fixe("#t-regles", t("regles"));
+  const regles = document.querySelector("#t-regles-corps"); if (regles) regles.innerHTML = t("regles_html");
+  const table = document.querySelector("#table"); if (table) table.setAttribute("aria-label", t("table_aria"));
+  const main = document.querySelector("#main"); if (main) main.setAttribute("aria-label", t("main_aria"));
+}
+/* Change de langue : interface, annonces vocales et textes déjà affichés suivent. */
+function appliquerLangue() {
+  appliquerVoix();
+  traduireStatique();
+  if (S.accueilActif) construireAccueil();
+  render(); renderJournal(); majBoutonQuitter(); majBoutonsMedia(); majVisio();
+}
+
 function carteHtml(c, extra) {
   const rouge = c.c === "Coeur" || c.c === "Carreau";
-  return `<span class="carte ${rouge ? "rouge" : ""} ${extra || ""}"><span class="coin"><b>${ABREGE[c.v]}</b><i>${SYM[c.c]}</i></span><span class="gros">${SYM[c.c]}</span></span>`;
+  return `<span class="carte ${rouge ? "rouge" : ""} ${extra || ""}"><span class="coin"><b>${abr(c.v)}</b><i>${SYM[c.c]}</i></span><span class="gros">${SYM[c.c]}</span></span>`;
 }
 const symHtml = (couleur) => `<span class="${couleur === "Coeur" || couleur === "Carreau" ? "rouge" : ""}">${SYM[couleur]}</span>`;
 
-function log(msg) { S.journal.unshift(msg); if (S.journal.length > 10) S.journal.pop(); renderJournal(); }
+function log(k, ...a) { S.journal.unshift(typeof k === "string" && a.length === 0 && !I18N.fr[k] ? k : msg(k, ...a)); if (S.journal.length > 10) S.journal.pop(); renderJournal(); }
 
 function render() {
   if (S.auto) return;
   const eq = S.moi % 2;
-  $("#scores").innerHTML = `<span>Nous</span> <b>${S.scores[eq]}</b> <span>Eux</span> <b>${S.scores[1 - eq]}</b> <span>objectif ${S.cible}</span>`;
+  $("#scores").innerHTML = `<span>${t("nous")}</span> <b>${S.scores[eq]}</b> <span>${t("eux")}</span> <b>${S.scores[1 - eq]}</b> <span>${t("objectif", S.cible)}</span>`;
   for (let q = 0; q < 4; q++) {
-    const plaque = `<span class="plaque ${S.tour === q ? "actif" : ""}">${esc(nom(q))}${S.donneur === q ? '<span class="donneur">Donneur</span>' : ""}</span>`;
-    const bulle = `<div class="bulle">${S.bulles[q] || ""}</div>`;
+    const plaque = `<span class="plaque ${S.tour === q ? "actif" : ""}">${esc(nom(q))}${S.donneur === q ? `<span class="donneur">${t("donneur")}</span>` : ""}</span>`;
+    const bulle = `<div class="bulle">${bulleHtml(S.bulles[q])}</div>`;
     const n = S.plisGagnes[q] || 0;
-    const tas = n ? `<span class="pile" title="Plis gagnés : ${n}" aria-label="${n} pli${n > 1 ? "s" : ""} gagné${n > 1 ? "s" : ""}"><span class="tas">${
+    const tas = n ? `<span class="pile" title="${t("pile_titre", n)}" aria-label="${t("pile_aria", n)}"><span class="tas">${
       Array.from({ length: Math.min(n, 5) }, (_, i) => `<i style="left:${i * 2}px;top:${(4 - i) * 2}px"></i>`).join("")}</span><b>${n}</b></span>` : "";
     const corps = q === S.moi ? plaque + tas + bulle
       : `${plaque}${S.mains[q].length ? `<span class="carte dos"><span class="nb">${S.mains[q].length}</span></span>` : ""}${tas}${bulle}`;
@@ -701,18 +1071,19 @@ function render() {
   let lignes = [];
   if (S.mode === "coinche" && S.enchereCourante && S.atout === null) {
     const e = S.enchereCourante;
-    lignes = [`<div class="titre">Enchère</div>`, `<div>${nomContrat(e.valeur)} ${symHtml(e.couleur)}</div>`, `<div>par ${esc(nom(e.j))}</div>`];
+    lignes = [`<div class="titre">${t("c_enchere")}</div>`, `<div>${nomContrat(e.valeur)} ${symHtml(e.couleur)}</div>`, `<div>${esc(t("c_par", nom(e.j)))}</div>`];
   } else if (S.atout) {
-    lignes = [`<div class="titre">Atout ${symHtml(S.atout)}</div>`];
-    if (S.contrat) lignes.push(`<div>Contrat ${nomContrat(S.contrat)}</div>`);
-    lignes.push(`<div>Preneur : ${esc(nom(S.preneur))}</div>`);
-    if (S.mult > 1) lignes.push(`<div class="note">${S.mult === 2 ? "Coinché ×2" : "Surcoinché ×4"}</div>`);
+    lignes = [`<div class="titre">${t("c_atout", symHtml(S.atout))}</div>`];
+    if (S.contrat) lignes.push(`<div>${t("c_contrat", nomContrat(S.contrat))}</div>`);
+    lignes.push(`<div>${esc(t("c_preneur", nom(S.preneur)))}</div>`);
+    if (S.mult > 1) lignes.push(`<div class="note">${S.mult === 2 ? t("c_coinche") : t("c_surcoinche")}</div>`);
   } else if (S.retournee) {
-    lignes = [`<div class="titre">Retournée</div>`, `<div>${carteHtml(S.retournee, "mini")}</div>`];
+    lignes = [`<div class="titre">${t("c_retournee")}</div>`, `<div>${carteHtml(S.retournee, "mini")}</div>`];
   }
   $("#contrat").innerHTML = lignes.join("");
-  const avis = S.avis && Date.now() < S.avis.jusqua ? S.avis.txt : null;
-  $("#info").textContent = avis || (S.toast ? fmt(S.toast) : "");
+  const avis = S.avis && Date.now() < S.avis.jusqua ? txtMsg(S.avis) : null;
+  const toast = S.toast ? (typeof S.toast === "string" ? fmt(S.toast) : t("toast", nom(S.toast.a[0].q), t(S.toast.k))) : "";
+  $("#info").textContent = avis || toast;
   $("#info").className = "info" + (avis ? " avis" : "");
   majBoutonQuitter();
   let pli = "";
@@ -735,8 +1106,8 @@ function render() {
     const rouge = c.c === "Coeur" || c.c === "Carreau";
     const jouable = att && has(att.jouables, c);
     const cls = `carte ${rouge ? "rouge" : ""} ${att ? (jouable ? "jouable" : "grise") : ""}`;
-    const label = `${c.v} de ${NOM_COULEUR[c.c]}`;
-    return `<button type="button" class="${cls}" data-k="${k(c)}" aria-label="${label}" ${jouable ? "" : "disabled"}><span class="coin"><b>${ABREGE[c.v]}</b><i>${SYM[c.c]}</i></span><span class="gros">${SYM[c.c]}</span></button>`;
+    const label = t("carte_aria", vn(c.v), cn(c.c));
+    return `<button type="button" class="${cls}" data-k="${k(c)}" aria-label="${label}" ${jouable ? "" : "disabled"}><span class="coin"><b>${abr(c.v)}</b><i>${SYM[c.c]}</i></span><span class="gros">${SYM[c.c]}</span></button>`;
   }).join("");
 }
 const RENDU = { gagnant: null };
@@ -764,13 +1135,14 @@ function majBoutonQuitter() {
   if (b) b.hidden = R.role === "solo";
 }
 /* Affiche un avis sur le tapis pendant quelques secondes. */
-function afficherAvis(txt, ms = 7000) {
-  S.avis = { txt, jusqua: Date.now() + ms };
-  log(txt);
+function afficherAvis(k, ...a) {
+  const ms = 7000;
+  S.avis = { k, a, jusqua: Date.now() + ms };
+  log(k, ...a);
   render();
   setTimeout(() => render(), ms + 100);
 }
-function renderJournal() { if (!S.auto) $("#journal").innerHTML = S.journal.map((m) => `<li>${esc(fmt(m))}</li>`).join(""); }
+function renderJournal() { if (!S.auto) $("#journal").innerHTML = S.journal.map((m) => `<li>${esc(txtMsg(m))}</li>`).join(""); }
 
 $("#main").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-k]");
@@ -950,19 +1322,19 @@ function question(zone, txt) { const q = document.createElement("div"); q.classN
 function humainPrise(retournee, tour) {
   return attendre((zone, fin) => {
     if (tour === 1) {
-      question(zone, "Prendre à la couleur retournée ?");
-      zone.appendChild(bouton(`Prendre à ${symHtml(retournee.c)}`, "or", () => fin(retournee.c), true));
-      zone.appendChild(bouton("Passer", "", () => fin(null)));
+      question(zone, t("prise1_q"));
+      zone.appendChild(bouton(t("prise1_btn", symHtml(retournee.c)), "or", () => fin(retournee.c), true));
+      zone.appendChild(bouton(t("passer"), "", () => fin(null)));
     } else {
-      question(zone, "Choisir un atout ?");
-      for (const c of COULEURS.filter((x) => x !== retournee.c)) zone.appendChild(bouton(`${symHtml(c)} ${NOM_COULEUR[c]}`, "or", () => fin(c), true));
-      zone.appendChild(bouton("Passer", "", () => fin(null)));
+      question(zone, t("prise2_q"));
+      for (const c of COULEURS.filter((x) => x !== retournee.c)) zone.appendChild(bouton(`${symHtml(c)} ${cn(c)}`, "or", () => fin(c), true));
+      zone.appendChild(bouton(t("passer"), "", () => fin(null)));
     }
   });
 }
 function humainEnchere(courant) {
   return attendre((zone, fin) => {
-    question(zone, "Votre enchère");
+    question(zone, t("enchere_q"));
     let choisie = null;
     const vals = document.createElement("div"); vals.className = "valeurs";
     const suits = document.createElement("div"); suits.className = "valeurs";
@@ -980,11 +1352,11 @@ function humainEnchere(courant) {
       chips.push(ch); vals.appendChild(ch);
     }
     const suitBtns = COULEURS.map((c) => {
-      const b = bouton(`${symHtml(c)} ${NOM_COULEUR[c]}`, "or", () => fin({ valeur: choisie, couleur: c }), true);
+      const b = bouton(`${symHtml(c)} ${cn(c)}`, "or", () => fin({ valeur: choisie, couleur: c }), true);
       b.disabled = true; suits.appendChild(b); return b;
     });
     zone.appendChild(vals); zone.appendChild(suits);
-    zone.appendChild(bouton("Passer", "", () => fin(null)));
+    zone.appendChild(bouton(t("passer"), "", () => fin(null)));
   });
 }
 function humainOuiNon(q, oui, non) {
@@ -997,7 +1369,7 @@ function humainOuiNon(q, oui, non) {
 function humainCarte(jouables) {
   return new Promise((res) => {
     S.attenteCarte = { jouables, resolve: res };
-    $("#action").innerHTML = '<div class="question">À vous de jouer</div>';
+    $("#action").innerHTML = `<div class="question">${t("a_vous")}</div>`;
     render();
   }).then((c) => { $("#action").innerHTML = ""; return c; });
 }
@@ -1011,8 +1383,8 @@ function reponseLocale(kind, d) {
   switch (kind) {
     case "prise": return humainPrise(d.retournee, d.tour);
     case "enchere": return humainEnchere(d.courant);
-    case "coinche": return humainOuiNon(`${nom(d.preneur)} a pris ${nomContrat(d.valeur)} ${SYM[d.couleur]}. Coincher ?`, "Coincher (×2)", "Laisser");
-    case "surcoinche": return humainOuiNon("Vous êtes coinchés. Surcoincher ?", "Surcoincher (×4)", "Laisser");
+    case "coinche": return humainOuiNon(t("coinche_q", nom(d.preneur), nomContrat(d.valeur), SYM[d.couleur]), t("coinche_btn"), t("laisser"));
+    case "surcoinche": return humainOuiNon(t("surcoinche_q"), t("surcoinche_btn"), t("laisser"));
     case "carte": return humainCarte(d.jouables);
   }
 }
@@ -1057,13 +1429,13 @@ async function encheresBelote(mains, retournee, donneur) {
       if (estHumain(p)) choix = await demander(p, "prise", { retournee, tour });
       else { await reflechir(); choix = bots[p].prise(mains[p], retournee, tour); }
       if (choix) {
-        S.bulles[p] = `Prend à ${symHtml(choix)}`;
-        log(`${N(p)} prend à ${SYM[choix]} ${NOM_COULEUR[choix]}.`);
+        S.bulles[p] = msg("b_prend", choix);
+        log("log_prend", { q: p }, { s: choix }, { c: choix });
         S.tour = null; render();
         if (!(await annoncer(p, "prend", choix))) await pause(900);
         return { preneur: p, atout: choix };
       }
-      S.bulles[p] = "Passe"; log(`${N(p)} passe.`); render();
+      S.bulles[p] = msg("b_passe"); log("log_passe", { q: p }); render();
       await annoncer(p, "passe");
     }
   }
@@ -1082,10 +1454,10 @@ async function encheresCoinche(mains, donneur) {
     if (choix && (courant === null || choix.valeur > courant.valeur) && ENCHERES.includes(choix.valeur)) {
       courant = { valeur: choix.valeur, couleur: choix.couleur, j: p };
       S.enchereCourante = courant; passes = 0;
-      S.bulles[p] = `${nomContrat(choix.valeur)} ${symHtml(choix.couleur)}`;
-      log(`${N(p)} annonce ${nomContrat(choix.valeur)} ${SYM[choix.couleur]}.`);
+      S.bulles[p] = msg("enchere", choix.valeur, choix.couleur);
+      log("log_annonce", { q: p }, { v: choix.valeur }, { s: choix.couleur });
       parole = ["enchere", choix.valeur, choix.couleur];
-    } else { passes++; S.bulles[p] = "Passe"; log(`${N(p)} passe.`); parole = ["passe"]; }
+    } else { passes++; S.bulles[p] = msg("b_passe"); log("log_passe", { q: p }); parole = ["passe"]; }
     render();
     await annoncer(p, ...parole);
     if (courant === null && passes === 4) return null;
@@ -1100,13 +1472,13 @@ async function encheresCoinche(mains, donneur) {
     if (estHumain(adv)) coinche = await demander(adv, "coinche", { preneur, valeur: courant.valeur, couleur: courant.couleur });
     else { await reflechir(); coinche = bots[adv].coinche(mains[adv], courant); }
     if (coinche) {
-      mult = 2; S.bulles[adv] = "Coinche !"; log(`${N(adv)} coinche !`); render();
+      mult = 2; S.bulles[adv] = msg("b_coinche"); log("log_coinche", { q: adv }); render();
       await annoncer(adv, "coinche");
       let sur;
       S.tour = preneur; render();
       if (estHumain(preneur)) sur = await demander(preneur, "surcoinche", { preneur, valeur: courant.valeur, couleur: courant.couleur });
       else { await reflechir(); sur = bots[preneur].surcoinche(mains[preneur], courant); }
-      if (sur) { mult = 4; S.bulles[preneur] = "Surcoinche !"; log(`${N(preneur)} surcoinche !`); render(); await annoncer(preneur, "surcoinche"); }
+      if (sur) { mult = 4; S.bulles[preneur] = msg("b_surcoinche"); log("log_surcoinche", { q: preneur }); render(); await annoncer(preneur, "surcoinche"); }
       break;
     }
   }
@@ -1122,16 +1494,16 @@ async function jouerDonne(donneur) {
 
   if (S.mode === "coinche") {
     mains = [0, 1, 2, 3].map((i) => jeu.slice(i * 8, i * 8 + 8));
-    S.mains = mains; log(`Nouvelle donne. Donneur : ${N(donneur)}.`); render(); await pause(500);
+    S.mains = mains; log("log_donne", { q: donneur }); render(); await pause(500);
     const r = await encheresCoinche(mains, donneur);
-    if (!r) { log("Personne n'enchérit : on redistribue."); S.bulles = {}; render(); await pause(1200); return null; }
+    if (!r) { log("log_nul_encherit"); S.bulles = {}; render(); await pause(1200); return null; }
     ({ preneur, atout, valeur: contrat, mult } = r);
   } else {
     mains = [0, 1, 2, 3].map((i) => jeu.slice(i * 5, i * 5 + 5));
     const retournee = jeu[20], reste = jeu.slice(21);
-    S.mains = mains; S.retournee = retournee; log(`Nouvelle donne. Donneur : ${N(donneur)}.`); render(); await pause(500);
+    S.mains = mains; S.retournee = retournee; log("log_donne", { q: donneur }); render(); await pause(500);
     const r = await encheresBelote(mains, retournee, donneur);
-    if (!r) { log("Personne ne prend : on redistribue."); S.retournee = null; S.bulles = {}; render(); await pause(1200); return null; }
+    if (!r) { log("log_nul_prend"); S.retournee = null; S.bulles = {}; render(); await pause(1200); return null; }
     ({ preneur, atout } = r);
     mains[preneur].push(retournee);
     let i = 0;
@@ -1167,8 +1539,8 @@ async function jouerDonne(donneur) {
       S.pli.push({ j: p, carte });
       if (p === beloteJoueur && ((carte.v === "Roi" || carte.v === "Dame") && carte.c === atout)) {
         beloteJouees++;
-        const t = beloteJouees === 1 ? "Belote !" : "Rebelote !";
-        log(`${N(p)} : ${t}`); S.toast = `${N(p)} : ${t}`; setTimeout(() => { S.toast = null; render(); }, 1600);
+        const cle = beloteJouees === 1 ? "belote" : "rebelote";
+        log("toast", { q: p }, { k: cle }); S.toast = { k: cle, a: [{ q: p }] }; setTimeout(() => { S.toast = null; render(); }, 1600);
         render();
         await annoncer(p, beloteJouees === 1 ? "belote" : "rebelote");
       }
@@ -1178,7 +1550,7 @@ async function jouerDonne(donneur) {
     const gain = S.pli.reduce((s, x) => s + pts(x.carte, atout), 0) + (numero === 7 ? DIX_DE_DER : 0);
     cartes[gagnant % 2] += gain; plis[gagnant % 2]++;
     S.gagnant = gagnant; render();
-    log(`Pli ${numero + 1} : ${N(gagnant)} (+${gain})`);
+    log("log_pli", numero + 1, { q: gagnant }, gain);
     await pause(1300);
     S.vus.push(...S.pli);
     S.plisGagnes[gagnant]++;
@@ -1209,33 +1581,34 @@ function attendreFiche(html, idBouton) {
 
 function bilanHtml(r) {
   const nous = S.moi % 2, eux = 1 - nous;
-  const equipe = (e) => (e === nous ? "Nous" : "Eux");
+  const equipe = (e) => (e === nous ? t("nous") : t("eux"));
   const eq = r.preneur % 2;
-  const ligneBelote = r.belote !== null ? `<tr><td>Belote-rebelote</td><td>${r.belote === nous ? "+20" : ""}</td><td>${r.belote === eux ? "+20" : ""}</td></tr>` : "";
-  const contratTxt = r.contrat === null ? `Atout ${symHtml(r.atout)}` : `Contrat ${nomContrat(r.contrat)} ${symHtml(r.atout)}${r.mult > 1 ? ` ×${r.mult}` : ""}`;
+  const ligneBelote = r.belote !== null ? `<tr><td>${t("tab_belote")}</td><td>${r.belote === nous ? "+20" : ""}</td><td>${r.belote === eux ? "+20" : ""}</td></tr>` : "";
+  const contratTxt = r.contrat === null ? t("c_atout", symHtml(r.atout))
+    : `${t("c_contrat", nomContrat(r.contrat))} ${symHtml(r.atout)}${r.mult > 1 ? ` ×${r.mult}` : ""}`;
   const pour = eq === nous;
   const verdict = r.rempli
-    ? `<span class="verdict ${pour ? "ok" : "ko"}">Contrat rempli par ${equipe(eq)}</span>`
-    : `<span class="verdict ${pour ? "ko" : "ok"}">Chute de ${equipe(eq)}</span>`;
-  return `<h2>Fin de la donne</h2>
-    <div>${contratTxt}, pris par ${esc(nom(r.preneur))}. ${verdict}.</div>
-    <table class="bilan"><thead><tr><th></th><th>Nous</th><th>Eux</th></tr></thead><tbody>
-      <tr><td>Plis gagnés</td><td>${r.plis[nous]}</td><td>${r.plis[eux]}</td></tr>
-      <tr><td>Points des cartes (dix de der compris)</td><td>${r.cartes[nous]}</td><td>${r.cartes[eux]}</td></tr>
+    ? `<span class="verdict ${pour ? "ok" : "ko"}">${t("verdict_ok", equipe(eq))}</span>`
+    : `<span class="verdict ${pour ? "ko" : "ok"}">${t("verdict_ko", equipe(eq))}</span>`;
+  return `<h2>${t("bilan_titre")}</h2>
+    <div>${t("pris_par", contratTxt, esc(nom(r.preneur)), verdict)}</div>
+    <table class="bilan"><thead><tr><th></th><th>${t("nous")}</th><th>${t("eux")}</th></tr></thead><tbody>
+      <tr><td>${t("tab_plis")}</td><td>${r.plis[nous]}</td><td>${r.plis[eux]}</td></tr>
+      <tr><td>${t("tab_cartes")}</td><td>${r.cartes[nous]}</td><td>${r.cartes[eux]}</td></tr>
       ${ligneBelote}
-      <tr><td><b>Marqué</b></td><td><b>${r.marque[nous]}</b></td><td><b>${r.marque[eux]}</b></td></tr>
+      <tr><td><b>${t("tab_marque")}</b></td><td><b>${r.marque[nous]}</b></td><td><b>${r.marque[eux]}</b></td></tr>
     </tbody></table>`;
 }
 function ficheBilan(r, fin) {
-  return bilanHtml(r) + `<button class="btn or" id="suite" type="button">${fin ? "Voir le résultat" : "Donne suivante"}</button>`;
+  return bilanHtml(r) + `<button class="btn or" id="suite" type="button">${fin ? t("voir_resultat") : t("donne_suivante")}</button>`;
 }
 function ficheFin(scores) {
   const nous = S.moi % 2, eux = 1 - nous;
   const egal = scores[nous] === scores[eux];
   const gagne = scores[nous] > scores[eux];
-  const bouton = R.role === "solo" ? "Nouvelle partie" : "Retour à la salle";
-  return `<h2>${egal ? "Égalité" : gagne ? "Victoire !" : "Défaite"}</h2>
-    <div>Nous <b>${scores[nous]}</b> · Eux <b>${scores[eux]}</b></div>
+  const bouton = R.role === "solo" ? t("nouvelle_partie") : t("retour_salle");
+  return `<h2>${egal ? t("egalite") : gagne ? t("victoire") : t("defaite")}</h2>
+    <div>${t("nous")} <b>${scores[nous]}</b> · ${t("eux")} <b>${scores[eux]}</b></div>
     <button class="btn or" id="suite" type="button">${bouton}</button>`;
 }
 
@@ -1314,7 +1687,7 @@ function diffuserEtat() {
       pli: S.pli, bulles: S.bulles, journal: S.journal, enchereCourante: S.enchereCourante, toast: S.toast,
       noms: R.nomsAbs.map((n, i) => (i === q ? null : n)),
       peers: R.places.map((p) => (p && p.peerId) || null),
-      avis: S.avis && Date.now() < S.avis.jusqua ? S.avis.txt : null,
+      avis: S.avis && Date.now() < S.avis.jusqua ? { k: S.avis.k, a: S.avis.a } : null,
       plisGagnes: S.plisGagnes,
       mains: S.mains.map((m, i) => (i === q ? m : m.length)),
     });
@@ -1337,27 +1710,27 @@ function afficherSalle() {
   const places = hote ? R.places : R.placesVues;
   const place = (q) => {
     const p = places[q];
-    if (p) return `<div class="place ${q === S.moi ? "moi" : ""}">${esc(p.nom)}${q === S.moi ? " (vous)" : ""}</div>`;
-    return `<button type="button" class="btn place libre" data-q="${q}">Bot · s'asseoir ici</button>`;
+    if (p) return `<div class="place ${q === S.moi ? "moi" : ""}">${esc(p.nom)}${q === S.moi ? t("vous_suffixe") : ""}</div>`;
+    return `<button type="button" class="btn place libre" data-q="${q}">${t("place_libre")}</button>`;
   };
   const n = places.filter(Boolean).length;
-  afficherFiche(`<h2>Salle en ligne</h2>
-    <p class="message">Donnez ce code aux autres joueurs, ils le saisissent dans « Rejoindre ».</p>
-    <div class="code-salle" aria-label="Code de la salle">${esc(R.code || "")}</div>
-    <p class="message">Les deux places d'une même équipe sont face à face. Les places libres sont jouées par des bots.</p>
+  afficherFiche(`<h2>${t("salle_titre")}</h2>
+    <p class="message">${t("salle_aide")}</p>
+    <div class="code-salle" aria-label="${esc(t("code_ph"))}">${esc(R.code || "")}</div>
+    <p class="message">${t("salle_equipes")}</p>
     <div class="equipes">
-      <div><b>Équipe A</b>${place(0)}${place(2)}</div>
-      <div><b>Équipe B</b>${place(1)}${place(3)}</div>
+      <div><b>${t("equipe_a")}</b>${place(0)}${place(2)}</div>
+      <div><b>${t("equipe_b")}</b>${place(1)}${place(3)}</div>
     </div>
     ${hote
-      ? `<button class="btn or" id="lancer" type="button" ${n < 2 ? "disabled" : ""}>${n < 2 ? "En attente d'un autre joueur…" : `Lancer la partie (${n} joueurs)`}</button>`
-      : `<p class="message">En attente du lancement par l'hôte…</p>`}
+      ? `<button class="btn or" id="lancer" type="button" ${n < 2 ? "disabled" : ""}>${n < 2 ? t("attente_joueur") : t("lancer", n)}</button>`
+      : `<p class="message">${t("attente_hote")}</p>`}
     <div class="actions-media">
-      <button class="btn" type="button" data-media="audio" aria-pressed="false">Micro</button>
-      <button class="btn" type="button" data-media="video" aria-pressed="false">Caméra</button>
+      <button class="btn" type="button" data-media="audio" aria-pressed="false">${t("micro")}</button>
+      <button class="btn" type="button" data-media="video" aria-pressed="false">${t("camera")}</button>
     </div>
-    <p class="message">Micro et caméra sont facultatifs et passent directement entre les navigateurs des joueurs.</p>
-    <button class="btn" id="quitter" type="button">Quitter la salle</button>`);
+    <p class="message">${t("media_note")}</p>
+    <button class="btn" id="quitter" type="button">${t("quitter_salle")}</button>`);
   document.querySelectorAll("#fiche button[data-q]").forEach((b) => b.addEventListener("click", () => demanderPlace(Number(b.dataset.q))));
   const lancer = $("#lancer");
   if (lancer) lancer.addEventListener("click", lancerEnLigne);
@@ -1439,10 +1812,10 @@ function lienDirect(conn) {
 /* Une salle est joignable par deux voies indépendantes : connexion directe (PeerJS) et serveur de messages
    (MQTT). Elle s'ouvre dès que l'une des deux répond ; les joueurs utilisent celle qui marche pour eux. */
 async function ouvrirSalle(pseudo, tentative = 0) {
-  if (typeof mqtt === "undefined" && typeof Peer === "undefined") return messageReseau("Le jeu en ligne n'est pas disponible : les bibliothèques réseau n'ont pas pu être chargées.", true);
+  if (typeof mqtt === "undefined" && typeof Peer === "undefined") return messageReseau("net_indispo", true);
   if (tentative === 0) quitterReseau();
   const jeton = ++R.essai;
-  messageReseau("Création de la salle… (quelques secondes)");
+  messageReseau("net_creation");
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const code = Array.from({ length: 5 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
   const rubrique = PREFIXE + code + "/", id = idAleatoire();
@@ -1451,7 +1824,7 @@ async function ouvrirSalle(pseudo, tentative = 0) {
   const prete = () => { if (!pret && jeton === R.essai) { pret = true; initHote(code, id, pseudo, rubrique); } };
   const echec = () => {
     echecs++;
-    if (echecs >= voies && !pret && jeton === R.essai) messageReseau("Le service de salles ne répond pas (il est public et parfois saturé). Réessayez dans un instant.", true);
+    if (echecs >= voies && !pret && jeton === R.essai) messageReseau("net_sature", true);
   };
   // a) connexion directe : l'identifiant réseau de l'hôte est le code de la salle
   if (typeof Peer !== "undefined") {
@@ -1550,13 +1923,13 @@ function accepter(conn) {
         const libres = [0, 1, 2, 3].filter((i) => R.absents[i] && S.sieges[i] === "bot");
         let q = libres.find((i) => jeton && R.absents[i].jeton === jeton);
         if (q === undefined) q = libres.find((i) => R.absents[i].nom.toLowerCase() === nom.toLowerCase());
-        if (q === undefined) { conn.send({ t: "refus", raison: "Une partie est déjà en cours dans cette salle. Seul un joueur parti peut y revenir." }); setTimeout(() => conn.close(), 200); return; }
+        if (q === undefined) { conn.send({ t: "refus", code: "encours" }); setTimeout(() => conn.close(), 200); return; }
         reprendrePlace(conn, q, nom, jeton, peerId);
         return;
       }
-      if (R.phase !== "salle") { conn.send({ t: "refus", raison: "La salle n'est plus disponible." }); setTimeout(() => conn.close(), 200); return; }
+      if (R.phase !== "salle") { conn.send({ t: "refus", code: "indispo" }); setTimeout(() => conn.close(), 200); return; }
       const q = ORDRE_PLACES.find((i) => !R.places[i]);
-      if (q === undefined) { conn.send({ t: "refus", raison: "La salle est pleine." }); setTimeout(() => conn.close(), 200); return; }
+      if (q === undefined) { conn.send({ t: "refus", code: "pleine" }); setTimeout(() => conn.close(), 200); return; }
       conn._siege = q;
       R.places[q] = { nom, lien: conn, peerId, jeton };
       diffuserSalle(); afficherSalle(); synchroniserMedia();
@@ -1589,7 +1962,7 @@ function reprendrePlace(conn, q, nom, jeton, peerId) {
   S.sieges[q] = "distant"; R.nomsAbs[q] = nom; S.noms[q] = q === S.moi ? null : nom;
   conn.send({ t: "debut" });
   synchroniserMedia();
-  afficherAvis(`${nom} est revenu dans la partie.`);
+  afficherAvis("avis_revenu", nom);
 }
 
 function joueurParti(conn, volontaire) {
@@ -1603,7 +1976,7 @@ function joueurParti(conn, volontaire) {
   S.sieges[q] = "bot"; R.nomsAbs[q] = null; S.noms[q] = null;
   R.absents[q] = { nom: nomParti, jeton: jetonParti };
   synchroniserMedia();
-  afficherAvis(volontaire ? `${nomParti} a quitté la partie. Un bot prend sa place.` : `${nomParti} a été déconnecté. Un bot prend sa place.`);
+  afficherAvis(volontaire ? "avis_quitte" : "avis_deconnecte", nomParti);
   for (const [id, a] of [...R.attentes]) {
     if (a.p === q) { R.attentes.delete(id); a.res(reponseBot(q, a.kind, a.d)); }
   }
@@ -1638,7 +2011,7 @@ const M = {
   appels: new Map(),                    // "kind:peerId" -> appel sortant
   recus: new Map(),                     // "kind:peerId" -> { appel, flux }
   lecteurs: new Map(),                  // peerId -> <audio>
-  analyses: new WeakMap(), ctx: null,
+  analyses: new WeakMap(), ctx: null, message: null,
   signature: "",
 };
 const peersActuels = () => (R.role === "hote" ? R.places.map((p) => (p && p.peerId) || null) : R.peersVus || [null, null, null, null]);
@@ -1688,22 +2061,23 @@ function synchroniserMedia() {
   majVisio();
 }
 
-function messageMedia(txt) {
+function messageMedia(k) {
+  M.message = k || null;
   const el = document.querySelector("#msg-media");
-  if (el) el.textContent = txt || "";
+  if (el) el.textContent = k ? t(k) : "";
 }
 async function basculerMedia(kind) {
   contexteAudio();
   if (M.flux[kind]) { arreterFlux(kind); synchroniserMedia(); majBoutonsMedia(); majRelais(); return; }
   const md = typeof navigator !== "undefined" && navigator.mediaDevices;
-  if (!md || !md.getUserMedia) { messageMedia("Ce navigateur ne permet pas d'utiliser le micro ou la caméra ici."); return; }
+  if (!md || !md.getUserMedia) { messageMedia("med_indispo"); return; }
   try {
     M.flux[kind] = await md.getUserMedia(kind === "audio"
       ? { audio: { echoCancellation: true, noiseSuppression: true }, video: false }
       : { video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: "user" }, audio: false });
     messageMedia("");
   } catch (e) {
-    messageMedia(kind === "audio" ? "Accès au micro refusé ou indisponible." : "Accès à la caméra refusé ou indisponible.");
+    messageMedia(kind === "audio" ? "med_refus_audio" : "med_refus_video");
   }
   synchroniserMedia(); majBoutonsMedia(); majRelais();
 }
@@ -1721,15 +2095,8 @@ function arreterMedia() {
   M.appels.clear(); M.recus.clear();
   majVisio(); majBoutonsMedia();
 }
-function majBoutonsMedia() {
-  document.querySelectorAll("[data-media]").forEach((b) => {
-    const actif = !!M.flux[b.dataset.media];
-    b.setAttribute("aria-pressed", String(actif));
-    b.textContent = (b.dataset.media === "audio" ? "Micro" : "Caméra") + (actif ? " activé" : "");
-  });
-}
 
-const TETE_SVG = '<svg class="visage" viewBox="0 0 64 64" role="img" aria-label="Caméra éteinte" fill="currentColor"><circle cx="32" cy="22" r="12"/><path d="M8 60c0-13 10-22 24-22s24 9 24 22z"/></svg>';
+const TETE_SVG = '<svg class="visage" viewBox="0 0 64 64" role="img" aria-label="" fill="currentColor"><circle cx="32" cy="22" r="12"/><path d="M8 60c0-13 10-22 24-22s24 9 24 22z"/></svg>';
 const MICRO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V22h2v-3.1A7 7 0 0 0 19 12z"/></svg>';
 const CAMERA_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10a2 2 0 0 1 2 2v1.5l4-2.5v10l-4-2.5V16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/></svg>';
 
@@ -1803,7 +2170,7 @@ function majVisio() {
   if (panneau) panneau.hidden = R.role === "solo";
   const humains = siegesHumains();
   // vignettes obsolètes
-  document.querySelectorAll(".tuile").forEach((t) => { if (!humains.includes(Number(t.dataset.q))) t.remove(); });
+  document.querySelectorAll(".tuile").forEach((tu) => { if (!humains.includes(Number(tu.dataset.q))) tu.remove(); });
   const peers = peersActuels();
   const lecteursVus = new Set();
   for (const q of humains) {
@@ -1811,17 +2178,17 @@ function majVisio() {
     const soi = q === S.moi;
     const conteneur = document.querySelector(`#siege-${rel(q)} .siege-visio`);
     if (!conteneur) continue;
-    let t = document.querySelector(`.tuile[data-q="${q}"]`);
-    if (!t) {
-      t = document.createElement("div");
-      t.className = "tuile"; t.dataset.q = String(q);
-      t.innerHTML = `${TETE_SVG}<video playsinline autoplay muted hidden></video><img class="relais" alt="" hidden><span class="son" hidden></span><span class="etiquette"></span>` +
-        (soi ? `<span class="boutons"><button type="button" class="bouton-media" data-media="audio" aria-pressed="false" aria-label="Micro">${MICRO_SVG}</button><button type="button" class="bouton-media" data-media="video" aria-pressed="false" aria-label="Caméra">${CAMERA_SVG}</button></span>` : "");
+    let tu = document.querySelector(`.tuile[data-q="${q}"]`);
+    if (!tu) {
+      tu = document.createElement("div");
+      tu.className = "tuile"; tu.dataset.q = String(q);
+      tu.innerHTML = `${TETE_SVG}<video playsinline autoplay muted hidden></video><img class="relais" alt="" hidden><span class="son" hidden></span><span class="etiquette"></span>` +
+        (soi ? `<span class="boutons"><button type="button" class="bouton-media" data-media="audio" aria-pressed="false" aria-label="${t("micro")}">${MICRO_SVG}</button><button type="button" class="bouton-media" data-media="video" aria-pressed="false" aria-label="${t("camera")}">${CAMERA_SVG}</button></span>` : "");
     }
-    if (t.parentNode !== conteneur) conteneur.appendChild(t);
-    t.dataset.q = String(q);
+    if (tu.parentNode !== conteneur) conteneur.appendChild(tu);
+    tu.dataset.q = String(q);
     const flux = soi ? M.flux.video : id && (M.recus.get("video:" + id) || {}).flux;
-    const video = t.querySelector("video");
+    const video = tu.querySelector("video");
     if (video.srcObject !== (flux || null)) {
       video.srcObject = flux || null;
       if (flux) { const p = video.play(); if (p && p.catch) p.catch(() => {}); }
@@ -1831,18 +2198,18 @@ function majVisio() {
     // mode de secours : image reçue par le serveur de messages quand la connexion directe ne passe pas
     const rv = !soi && !flux ? RELAIS.images.get(q) : null;
     const imageFraiche = !!rv && Date.now() - rv.ts < 4000;
-    const img = t.querySelector("img.relais");
+    const img = tu.querySelector("img.relais");
     if (imageFraiche) { if (img.dataset.url !== rv.url) { img.src = rv.url; img.dataset.url = rv.url; } img.hidden = false; }
     else { img.hidden = true; }
-    t.querySelector(".visage").style.display = flux || imageFraiche ? "none" : "";
+    tu.querySelector(".visage").style.display = flux || imageFraiche ? "none" : "";
     const relaisSon = !soi && !(id && M.recus.has("audio:" + id)) && relaisAudioFrais(q);
     const audioActif = soi ? !!M.flux.audio : !!(id && M.recus.has("audio:" + id)) || relaisSon;
-    t.querySelector(".son").hidden = !audioActif;
+    tu.querySelector(".son").hidden = !audioActif;
     const videoVisible = soi ? !!M.flux.video : (!!flux || imageFraiche);
-    t.classList.toggle("masquer", videoVisible && audioActif);
-    t.querySelector(".etiquette").textContent = nomVisio(q);
-    t.title = nomVisio(q);
-    t.setAttribute("aria-label", "Vignette de " + nomVisio(q));
+    tu.classList.toggle("masquer", videoVisible && audioActif);
+    tu.querySelector(".etiquette").textContent = nomVisio(q);
+    tu.title = nomVisio(q);
+    tu.setAttribute("aria-label", t("vignette_de", nomVisio(q)));
     // lecteur audio (autres joueurs) : rattaché au document, pas masqué par display:none
     if (!soi && id) {
       const r = M.recus.get("audio:" + id);
@@ -1868,9 +2235,17 @@ function majBoutonsMedia() {
   document.querySelectorAll("[data-media]").forEach((b) => {
     const actif = !!M.flux[b.dataset.media];
     b.setAttribute("aria-pressed", String(actif));
-    const nomBtn = b.dataset.media === "audio" ? "Micro" : "Caméra";
-    if (b.classList.contains("bouton-media")) b.setAttribute("aria-label", nomBtn + (actif ? " activé : cliquer pour couper" : " éteint : cliquer pour activer"));
-    else b.textContent = nomBtn + (actif ? " activé" : "");
+    const nomBtn = b.dataset.media === "audio" ? t("micro") : t("camera");
+    if (b.classList.contains("bouton-media")) b.setAttribute("aria-label", actif ? t("media_on", nomBtn) : t("media_off", nomBtn));
+    else b.textContent = nomBtn + (actif ? " · " + t("active") : "");
+  });
+  const mm = document.querySelector("#msg-media");
+  if (mm && M.message) mm.textContent = t(M.message);
+  document.querySelectorAll(".tuile").forEach((tu) => {
+    const q = Number(tu.dataset.q);
+    tu.title = nomVisio(q);
+    tu.setAttribute("aria-label", t("vignette_de", nomVisio(q)));
+    const v = tu.querySelector(".visage"); if (v) v.setAttribute("aria-label", t("cam_eteinte"));
   });
 }
 
@@ -2000,7 +2375,7 @@ function majRelais() {
   if (besoin && M.flux.video) demarrerRelaisVideo(); else arreterRelaisVideo();
   if (besoin !== RELAIS.actif) {
     RELAIS.actif = besoin;
-    messageMedia(besoin ? "Connexion directe impossible : voix et vidéo passent en mode allégé (qualité réduite)." : "");
+    messageMedia(besoin ? "med_allege" : "");
   }
 }
 setInterval(() => { majRelais(); majVisio(); }, 1500);
@@ -2062,12 +2437,12 @@ setInterval(majParole, 150);
 
 /* ---- Client ---- */
 async function rejoindre(code, pseudo) {
-  if (typeof mqtt === "undefined" && typeof Peer === "undefined") return messageReseau("Le jeu en ligne n'est pas disponible : les bibliothèques réseau n'ont pas pu être chargées.", true);
+  if (typeof mqtt === "undefined" && typeof Peer === "undefined") return messageReseau("net_indispo", true);
   code = String(code || "").trim().toUpperCase();
-  if (!/^[A-Z2-9]{5}$/.test(code)) return messageReseau("Le code de la salle comporte 5 caractères.", true);
+  if (!/^[A-Z2-9]{5}$/.test(code)) return messageReseau("net_code5", true);
   quitterReseau();
   const jeton = ++R.essai;
-  messageReseau("Connexion à la salle… (quelques secondes)");
+  messageReseau("net_connexion");
   const id = idAleatoire(), rubrique = PREFIXE + code + "/";
   const ouverts = [];
   let gagnant = null, peer = null, peerIntrouvable = false, finir;
@@ -2112,7 +2487,7 @@ async function rejoindre(code, pseudo) {
   if (!gagnant) {
     fermerMqtt(null);
     if (peer) try { peer.destroy(); } catch (e) { /* rien */ }
-    return messageReseau(ouverts.length || peerIntrouvable ? "Salle introuvable : vérifiez le code." : "Impossible de joindre la salle (le service public est peut-être saturé). Réessayez dans un instant.", true);
+    return messageReseau(ouverts.length || peerIntrouvable ? "net_introuvable" : "net_injoignable", true);
   }
   R.role = "client"; R.code = code; R.rubrique = rubrique; R.monId = id; R.dernierVu = Date.now(); R.peerMedia = peer;
   let lien;
@@ -2120,7 +2495,7 @@ async function rejoindre(code, pseudo) {
     fermerMqtt(null);
     lien = lienDirect(gagnant.conn);
     lien.on("data", (m) => { R.dernierVu = Date.now(); if (m && m.t !== "ping") traiterMessageClient(m); });
-    lien.on("close", () => { if (R.role === "client") { quitterReseau(); menu(); messageReseau("La connexion avec l'hôte est perdue.", true); } });
+    lien.on("close", () => { if (R.role === "client") { quitterReseau(); menu(); messageReseau("net_perdue", true); } });
   } else {
     fermerMqtt(gagnant);
     const client = gagnant.client;
@@ -2144,10 +2519,10 @@ async function rejoindre(code, pseudo) {
   else if (R.peerMedia) R.peerMedia.on("open", (pid) => declarerPeerId(pid));
   R.minuteries.push(setInterval(() => {
     lien.send({ t: "ping" });
-    if (Date.now() - R.dernierVu > R.T.perteHote) { quitterReseau(); menu(); messageReseau("La connexion avec l'hôte est perdue.", true); }
+    if (Date.now() - R.dernierVu > R.T.perteHote) { quitterReseau(); menu(); messageReseau("net_perdue", true); }
   }, R.T.ping));
   R.minuteries.push(setTimeout(() => {
-    if (R.role === "client" && R.phase === null) { quitterReseau(); messageReseau("La salle ne répond pas. Vérifiez le code et réessayez.", true); }
+    if (R.role === "client" && R.phase === null) { quitterReseau(); messageReseau("net_noresp", true); }
   }, 12000));
 }
 
@@ -2166,11 +2541,11 @@ function traiterMessageClient(msg) {
     case "demande": traiterDemande(msg); break;
     case "fiche": traiterFiche(msg); break;
     case "voix": parlerLocal(msg.p, msg.type, msg.args || []); break;
-    case "refus": quitterReseau(); menu(); messageReseau(msg.raison || "Salle indisponible.", true); break;
+    case "refus": quitterReseau(); menu(); messageReseau("refus_" + (msg.code || "indispo"), true); break;
     case "ferme": {
-      const par = typeof msg.nom === "string" && msg.nom ? msg.nom : "L'hôte";
+      const par = typeof msg.nom === "string" && msg.nom ? msg.nom : t("hote_defaut");
       quitterReseau(); menu();
-      messageReseau(`${par} a quitté la partie : la salle est fermée.`, true);
+      messageReseau("net_ferme", true, par);
       break;
     }
   }
@@ -2180,7 +2555,7 @@ function appliquerEtat(m) {
   S.atout = m.atout; S.preneur = m.preneur; S.contrat = m.contrat; S.mult = m.mult; S.retournee = m.retournee;
   S.tour = m.tour; S.gagnant = m.gagnant; S.pli = m.pli; S.bulles = m.bulles; S.journal = m.journal;
   S.enchereCourante = m.enchereCourante; S.toast = m.toast; S.noms = m.noms; S.plisGagnes = m.plisGagnes || [0, 0, 0, 0];
-  if (m.avis) { if (!S.avis || S.avis.txt !== m.avis) S.avis = { txt: m.avis, jusqua: Date.now() + 7000 }; } else S.avis = null;
+  if (m.avis) { if (!S.avis || JSON.stringify([S.avis.k, S.avis.a]) !== JSON.stringify([m.avis.k, m.avis.a])) S.avis = { k: m.avis.k, a: m.avis.a, jusqua: Date.now() + 7000 }; } else S.avis = null;
   S.sieges = [0, 1, 2, 3].map((q) => (q === m.L ? "local" : "distant"));
   S.mains = m.mains.map((x) => (Array.isArray(x) ? x : new Array(x).fill(null)));
   const signature = JSON.stringify(m.peers || []);
@@ -2232,18 +2607,16 @@ function quitterReseau() {
 function quitterVolontaire() {
   if (R.role === "client" && R.lienHote) R.lienHote.send({ t: "quitte" });
   const attente = R.role === "client" ? 150 : 0; // laisse partir le message avant de couper
-  setTimeout(() => { quitterReseau(); R.message = { txt: "Vous avez quitté la partie. Vous pouvez y revenir tant qu'elle est en cours.", erreur: false }; menu(); }, attente);
+  setTimeout(() => { quitterReseau(); R.message = { k: "net_quitte", a: [], erreur: false }; menu(); }, attente);
 }
 function confirmerQuitter() {
   if (R.role === "solo") return;
   const hote = R.role === "hote";
-  afficherFiche(`<h2>Quitter la partie ?</h2>
-    <p class="message">${hote
-      ? "Vous êtes l'hôte : la salle sera fermée pour tous les joueurs."
-      : "Les autres joueurs en seront informés et un bot prendra votre place."}</p>
+  afficherFiche(`<h2>${t("q_titre")}</h2>
+    <p class="message">${hote ? t("q_hote") : t("q_client")}</p>
     <div class="actions-media">
-      <button class="btn danger" id="quitter-oui" type="button">Quitter</button>
-      <button class="btn or" id="quitter-non" type="button">Rester</button>
+      <button class="btn danger" id="quitter-oui" type="button">${t("q_oui")}</button>
+      <button class="btn or" id="quitter-non" type="button">${t("q_non")}</button>
     </div>`);
   $("#quitter-oui").addEventListener("click", quitterVolontaire);
   $("#quitter-non").addEventListener("click", () => {
@@ -2252,24 +2625,22 @@ function confirmerQuitter() {
   });
   $("#quitter-non").focus();
 }
-function messageReseau(txt, erreur) {
-  R.message = { txt, erreur: !!erreur };
+function messageReseau(k, erreur, ...a) {
+  R.message = k ? { k, a, erreur: !!erreur } : null;
   const el = document.querySelector("#msg-reseau");
-  if (el) { el.textContent = txt; el.className = "message" + (erreur ? " erreur" : ""); }
+  if (el) { el.textContent = R.message ? t(k, ...a) : ""; el.className = "message" + (erreur ? " erreur" : ""); }
 }
 
 function lireReglages() {
   try { return JSON.parse(localStorage.getItem("belote-reglages") || "{}"); } catch (e) { return {}; }
 }
 function ecrireReglages() {
-  try { localStorage.setItem("belote-reglages", JSON.stringify({ version: 2, mode: S.mode, lieu: S.lieu, niveau: S.niveau, cible: S.cible, rapide: S.rapide, voix: S.voix })); } catch (e) { /* stockage indisponible */ }
+  try { localStorage.setItem("belote-reglages", JSON.stringify({ version: 3, mode: S.mode, lieu: S.lieu, niveau: S.niveau, cible: S.cible, rapide: S.rapide, langue: S.langue, voixActive: S.voixActive })); } catch (e) { /* stockage indisponible */ }
 }
 
 function arreterVoix() { try { window.speechSynthesis.cancel(); } catch (e) { /* pas de synthèse vocale */ } }
 
-const LIBELLE_VOIX = { fr: "voix françaises", en: "English voices", es: "voces en español", ja: "日本語の音声", off: "sans voix" };
-
-/* Première page : la table est visible, un petit panneau propose de jouer seul ou en ligne. */
+/* Première page : la table est visible, un petit panneau propose de jouer en ligne ou contre les bots. */
 function menu() {
   if (R.role !== "solo") quitterReseau();
   S.partieId++; S.attenteCarte = null; arreterVoix();
@@ -2290,35 +2661,44 @@ function construireAccueil() {
     if (d && /^[A-Z2-9]{5}$/.test(d.code) && Date.now() - d.ts < 3 * 3600 * 1000) derniere = d;
   } catch (e) { /* stockage indisponible */ }
   const choix = (nom, val, lib, coche) => `<label class="option"><input type="radio" name="${nom}" value="${val}" ${coche ? "checked" : ""}><span>${lib}</span></label>`;
+  const langues = [["fr", "Français"], ["en", "English"], ["es", "Español"], ["ja", "日本語"]];
   $("#accueil").innerHTML = `<div class="carte-accueil">
-    <h2>Belote</h2>
-    <fieldset class="segment"><legend>Jeu</legend>
-      ${choix("mode", "belote", "Belote contrat", S.mode !== "coinche")}
-      ${choix("mode", "coinche", "Coinche", S.mode === "coinche")}
+    <div class="entete-accueil">
+      <h2>Belote</h2>
+      <div class="langues" role="group" aria-label="Langue / Language">
+        ${langues.map(([l, nomL]) => `<button type="button" class="langue" data-langue="${l}" aria-pressed="${langue() === l}" lang="${l}">${nomL}</button>`).join("")}
+      </div>
+    </div>
+    <fieldset class="segment"><legend>${t("jeu")}</legend>
+      ${choix("mode", "belote", t("belote_contrat"), S.mode !== "coinche")}
+      ${choix("mode", "coinche", t("coinche"), S.mode === "coinche")}
     </fieldset>
-    <fieldset class="segment"><legend>Jouer</legend>
-      ${choix("lieu", "ligne", "En ligne", S.lieu !== "bots")}
-      ${choix("lieu", "bots", "Contre les bots", S.lieu === "bots")}
+    <fieldset class="segment"><legend>${t("jouer")}</legend>
+      ${choix("lieu", "ligne", t("en_ligne"), S.lieu !== "bots")}
+      ${choix("lieu", "bots", t("contre_bots"), S.lieu === "bots")}
     </fieldset>
     <div id="bloc-ligne" ${S.lieu === "bots" ? "hidden" : ""}>
-      <input class="champ" id="pseudo" type="text" maxlength="16" autocomplete="nickname" value="${esc(pseudo)}" placeholder="Votre pseudo" aria-label="Votre pseudo">
-      ${derniere ? `<button class="btn or" id="revenir" type="button">Revenir dans la salle ${esc(derniere.code)}</button>` : ""}
-      <button class="btn or" id="creer" type="button">Créer une salle</button>
+      <input class="champ" id="pseudo" type="text" maxlength="16" autocomplete="nickname" value="${esc(pseudo)}" placeholder="${esc(t("pseudo_ph"))}" aria-label="${esc(t("pseudo_ph"))}">
+      ${derniere ? `<button class="btn or" id="revenir" type="button">${t("revenir", esc(derniere.code))}</button>` : ""}
+      <button class="btn or" id="creer" type="button">${t("creer")}</button>
       <div class="ligne">
-        <input class="champ" id="code" type="text" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Code de la salle" aria-label="Code de la salle">
-        <button class="btn" id="rejoindre" type="button">Rejoindre</button>
+        <input class="champ" id="code" type="text" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="${esc(t("code_ph"))}" aria-label="${esc(t("code_ph"))}">
+        <button class="btn" id="rejoindre" type="button">${t("rejoindre")}</button>
       </div>
-      <p class="message">De 2 à 4 joueurs, les places libres sont tenues par des bots. Si vous rejoignez une salle, le jeu est celui de l'hôte.</p>
+      <p class="message">${t("acc_aide")}</p>
       <p class="message" id="msg-reseau" aria-live="polite"></p>
     </div>
     <div id="bloc-bots" ${S.lieu === "bots" ? "" : "hidden"}>
-      <button class="btn or" id="jouer" type="button">Jouer</button>
+      <button class="btn or" id="jouer" type="button">${t("jouer")}</button>
     </div>
     <p class="resume">
-      <span>${S.cible} points · ${LIBELLE_VOIX[S.voix] || ""}</span>
-      <button class="lien" id="ouvrir-reglages" type="button">Réglages</button>
+      <span>${t("resume", S.cible, t("voix_libelle")[S.voix] || "")}</span>
+      <button class="lien" id="ouvrir-reglages" type="button">${t("reglages")}</button>
     </p>
   </div>`;
+  document.querySelectorAll("#accueil .langue").forEach((b) => b.addEventListener("click", () => {
+    S.langue = b.dataset.langue; ecrireReglages(); appliquerLangue();
+  }));
   const lirePseudo = () => {
     const p = propre($("#pseudo").value);
     try { localStorage.setItem("belote-pseudo", p); } catch (e) { /* stockage indisponible */ }
@@ -2338,35 +2718,35 @@ function construireAccueil() {
   const revenir = $("#revenir");
   if (revenir) revenir.addEventListener("click", () => { ecrireReglages(); rejoindre(derniere.code, lirePseudo() || derniere.pseudo); });
   $("#rejoindre").addEventListener("click", () => { ecrireReglages(); rejoindre($("#code").value, lirePseudo()); });
-  if (R.message) messageReseau(R.message.txt, R.message.erreur);
+  if (R.message) messageReseau(R.message.k, R.message.erreur, ...(R.message.a || []));
 }
 
 /* Réglages : mode, objectif, voix, rythme. Ils valent pour la prochaine partie (en ligne : ceux de l'hôte). */
 function reglages() {
   const radio = (nom, val, lib, coche) => `<label><input type="radio" name="${nom}" value="${val}" ${coche ? "checked" : ""}> ${lib}</label>`;
-  afficherFiche(`<h2>Réglages</h2>
-    <fieldset class="choix"><legend>Objectif</legend>
-      ${radio("cible", "500", "500 points (partie courte)", S.cible === 500)}
-      ${radio("cible", "1000", "1000 points", S.cible === 1000)}
+  afficherFiche(`<h2>${t("reg_titre")}</h2>
+    <fieldset class="choix"><legend>${t("reg_objectif")}</legend>
+      ${radio("cible", "500", t("reg_500"), S.cible === 500)}
+      ${radio("cible", "1000", t("reg_1000"), S.cible === 1000)}
     </fieldset>
-    <fieldset class="choix"><legend>Voix des joueurs</legend>
+    <fieldset class="choix"><legend>${t("reg_langue")}</legend>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px">
-        ${radio("voix", "fr", "Français", S.voix === "fr")}
-        ${radio("voix", "en", "English", S.voix === "en")}
-        ${radio("voix", "es", "Español", S.voix === "es")}
-        ${radio("voix", "ja", "日本語", S.voix === "ja")}
-        ${radio("voix", "off", "Sans voix", S.voix === "off")}
+        ${radio("langue", "fr", "Français", langue() === "fr")}
+        ${radio("langue", "en", "English", langue() === "en")}
+        ${radio("langue", "es", "Español", langue() === "es")}
+        ${radio("langue", "ja", "日本語", langue() === "ja")}
       </div>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" id="sans-voix" ${S.voixActive ? "" : "checked"}> ${t("reg_sans_voix")}</label>
     </fieldset>
-    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="rapide" ${S.rapide ? "checked" : ""}> Rythme rapide</label>
-    <p class="message">${R.role === "client" ? "En ligne, le jeu et l'objectif sont ceux de l'hôte." : "Les bots sont toujours experts."} Les changements s'appliquent à la prochaine partie.</p>
-    <button class="btn or" id="reglages-ok" type="button">Enregistrer</button>`);
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="rapide" ${S.rapide ? "checked" : ""}> ${t("reg_rapide")}</label>
+    <p class="message">${R.role === "client" ? t("reg_note_client") : t("reg_note_bots")}</p>
+    <button class="btn or" id="reglages-ok" type="button">${t("reg_ok")}</button>`);
   $("#reglages-ok").addEventListener("click", () => {
     const val = (n) => document.querySelector(`input[name="${n}"]:checked`).value;
-    S.cible = Number(val("cible")); S.voix = val("voix"); S.rapide = $("#rapide").checked;
+    S.cible = Number(val("cible")); S.langue = val("langue"); S.voixActive = !$("#sans-voix").checked; S.rapide = $("#rapide").checked;
     ecrireReglages();
     cacherFiche();
-    if (S.accueilActif) construireAccueil();
+    appliquerLangue();
   });
   $("#reglages-ok").focus();
 }
@@ -2374,7 +2754,21 @@ function reglages() {
 $("#btn-nouvelle").addEventListener("click", () => { R.message = null; menu(); });
 $("#btn-reglages").addEventListener("click", reglages);
 $("#btn-quitter").addEventListener("click", confirmerQuitter);
-{ const r = lireReglages(); if (r.mode) S.mode = r.mode; if (r.lieu === "bots") S.lieu = "bots"; S.niveau = "expert"; if (r.cible) S.cible = r.cible; if (r.voix) S.voix = r.voix; S.rapide = !!r.rapide; }
+{
+  const r = lireReglages();
+  if (r.mode) S.mode = r.mode;
+  if (r.lieu === "bots") S.lieu = "bots";
+  S.niveau = "expert";
+  if (r.cible) S.cible = r.cible;
+  S.rapide = !!r.rapide;
+  // langue : réglage mémorisé, sinon ancienne voix choisie, sinon langue du navigateur
+  if (LANGUES_UI.includes(r.langue)) S.langue = r.langue;
+  else if (LANGUES_UI.includes(r.voix)) S.langue = r.voix;
+  else S.langue = langueNavigateur();
+  S.voixActive = r.voixActive !== undefined ? !!r.voixActive : r.voix !== "off";
+  appliquerVoix();
+  traduireStatique();
+}
 render();
 menu();
 
