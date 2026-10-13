@@ -106,7 +106,7 @@ def afficher_main(main, atout=None):
 class Bot:
     """Bot simple : aucune mémoire des plis précédents."""
 
-    def debut_donne(self, moi, atout, preneur):
+    def debut_donne(self, moi, atout, preneur, contrat=None, mult=1):
         self.moi, self.atout, self.preneur = moi, atout, preneur
 
     def valeur_main(self, main, couleur):
@@ -216,10 +216,12 @@ class BotMalin(Bot):
         hautes = [(v, couleur) for v in ordre[ordre.index(carte[0]) + 1:]]
         return all(h in connues or h in main for h in hautes)
 
-    def choisir_carte(self, main, jouables, pli, atout, vus=()):
+    def choisir_carte(self, main, jouables, pli, atout, vus=(), connues=None):
         if len(jouables) == 1:
             return jouables[0]
-        connues = {c for _, c in vus} | {c for _, c in pli}
+        if connues is None:
+            connues = {c for _, c in vus}
+        connues = connues | {c for _, c in pli}
         atouts_dehors = [(v, atout) for v in ORDRE_ATOUT
                          if (v, atout) not in connues and (v, atout) not in main]
         moi = apres(pli[0][0], len(pli)) if pli else self.moi
@@ -251,15 +253,23 @@ class BotMalin(Bot):
         return min(jouables, key=lambda c: (points(c, atout), force(c, atout, c[1])))
 
     def entame(self, main, jouables, atout, connues, atouts_dehors, attaquant):
+        """Entame : l'attaquant tire d'abord les atouts adverses, puis encaisse ses cartes maîtresses ;
+        le défenseur évite d'ouvrir à l'atout et prépare une coupe dans une couleur courte."""
+        mes_atouts = [c for c in jouables if c[1] == atout]
         if attaquant and atouts_dehors:
-            maitres = [c for c in jouables if c[1] == atout and self.est_maitre(c, atout, connues, main)]
+            maitres = [c for c in mes_atouts if self.est_maitre(c, atout, connues, main)]
             if maitres:
                 return max(maitres, key=lambda c: force(c, atout, atout))
+            # Long en atouts sans le maître : un petit atout fait tomber les honneurs adverses.
+            if len([c for c in main if c[1] == atout]) >= 4 and mes_atouts:
+                return min(mes_atouts, key=lambda c: force(c, atout, atout))
         maitres = [c for c in jouables if c[1] != atout and self.est_maitre(c, atout, connues, main)]
         if maitres:
             return max(maitres, key=lambda c: points(c, atout))
         pool = [c for c in jouables if c[1] != atout] or jouables
-        return min(pool, key=lambda c: (points(c, atout), force(c, atout, c[1])))
+        longueur = {couleur: sum(1 for c in main if c[1] == couleur) for couleur in COULEURS}
+        sens = -1 if attaquant else 1   # attaque : couleur longue ; défense : couleur courte (pour couper)
+        return min(pool, key=lambda c: (points(c, atout), sens * longueur[c[1]], force(c, atout, c[1])))
 
 
 class BotExpert(BotMalin):
@@ -275,8 +285,8 @@ class BotExpert(BotMalin):
 
     APPELS = ("10", "Roi", "Dame")
     REFUS = ("7", "8")
-    ECHANTILLONS = 14
-    MARGE = 1.5  # en points : sous cet écart, on préfère la carte qui envoie un signal
+    ECHANTILLONS = 40   # donnes simulées par décision (mesuré : plus c'est élevé, meilleur est le jeu)
+    MARGE = 0.5         # en points : sous cet écart, on préfère la carte qui envoie un signal
 
     # --- Lecture des informations publiques --------------------------------------
     @staticmethod
@@ -357,30 +367,40 @@ class BotExpert(BotMalin):
                 w *= 0.3
         return w
 
-    def jouer_fin(self, mains, pli, atout, equipe):
-        """Termine la donne avec la politique simple. Renvoie les points de `equipe` (pli en cours compris)."""
-        simple = Bot()
-        gain = 0
+    def jouer_fin(self, mains, pli, atout, vus=()):
+        """Termine la donne avec la politique malin. Renvoie (points, plis) de chaque équipe à partir de maintenant."""
+        pol = BotMalin()
+        pol.atout, pol.preneur = atout, self.preneur
+        connues = {c for _, c in vus}
+        gain, plis = [0, 0], [0, 0]
         pli = list(pli)
         while True:
             while len(pli) < 4:
                 j = apres(pli[0][0], len(pli))
                 jouables = cartes_jouables(mains[j], pli, atout)
-                carte = jouables[0] if len(jouables) == 1 else simple.choisir_carte(mains[j], jouables, pli, atout)
+                if len(jouables) == 1:
+                    carte = jouables[0]
+                else:
+                    pol.moi = j
+                    carte = pol.choisir_carte(mains[j], jouables, pli, atout, (), connues)
                 mains[j].remove(carte)
                 pli.append((j, carte))
             gagnant = gagnant_pli(pli, atout)
             g = sum(points(c, atout) for _, c in pli)
-            if all(not m for m in mains.values()):
+            fini = all(not m for m in mains.values())
+            if fini:
                 g += BONUS_DIX_DE_DER
-            if gagnant % 2 == equipe:
-                gain += g
-            if all(not m for m in mains.values()):
-                return gain
-            pli = [(gagnant, None)]
-            # le gagnant entame : on lui fait jouer sa carte
+            gain[gagnant % 2] += g
+            plis[gagnant % 2] += 1
+            if fini:
+                return gain, plis
+            connues.update(c for _, c in pli)
             jouables = list(mains[gagnant])
-            carte = jouables[0] if len(jouables) == 1 else simple.choisir_carte(mains[gagnant], jouables, [], atout)
+            if len(jouables) == 1:
+                carte = jouables[0]
+            else:
+                pol.moi = gagnant
+                carte = pol.choisir_carte(mains[gagnant], jouables, [], atout, (), connues)
             mains[gagnant].remove(carte)
             pli = [(gagnant, carte)]
 
@@ -396,6 +416,7 @@ class BotExpert(BotMalin):
             return None
         vides = self.couleurs_vides(vus, pli, atout)
         partenaire = (moi + 2) % 4
+        eq = moi % 2
         totaux = {c: 0.0 for c in jouables}
         somme_poids = 0.0
         for _ in range(self.ECHANTILLONS):
@@ -405,9 +426,8 @@ class BotExpert(BotMalin):
             for c in jouables:
                 simul = {j: list(m) for j, m in mains.items()}
                 simul[moi] = [x for x in main if x != c]
-                courant = list(pli) + [(moi, c)]
-                # le pli en cours est complété par la politique simple, puis la donne continue
-                totaux[c] += w * self.jouer_fin(simul, courant, atout, moi % 2)
+                gain, _plis = self.jouer_fin(simul, list(pli) + [(moi, c)], atout, vus)
+                totaux[c] += w * gain[eq]
         return {c: t / somme_poids for c, t in totaux.items()}
 
     # --- Choix de la carte ---------------------------------------------------------
@@ -489,7 +509,7 @@ class BotExpert(BotMalin):
 
 
 class Humain:
-    def debut_donne(self, moi, atout, preneur):
+    def debut_donne(self, moi, atout, preneur, contrat=None, mult=1):
         pass
 
     def _demander(self, texte):
@@ -634,7 +654,7 @@ def jouer_donne(joueurs, donneur, parler=print, coinche=False):
     belote_equipe = None if belote_joueur is None else belote_joueur % 2
 
     for p, j in enumerate(joueurs):
-        j.debut_donne(p, atout, preneur)
+        j.debut_donne(p, atout, preneur, contrat, mult)
 
     vus = []
     belote_jouees = 0

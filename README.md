@@ -52,12 +52,13 @@ python3 -m unittest -v             # tests
 ## Bots
 
 - **expert** (par défaut) : joue comme le malin, et en plus :
-  - il simule des donnes plausibles à partir de ce qu'il a le droit de savoir (sa main, les cartes jouées, les couleurs que chacun n'a pas fournies, les enchères) puis joue la carte qui rapporte le plus en moyenne ; il ne voit jamais les mains des autres
+  - il simule 40 donnes plausibles à chaque décision, à partir de ce qu'il a le droit de savoir (sa main, les cartes jouées, les couleurs que chacun n'a pas fournies), puis joue la carte qui rapporte le plus en moyenne ; il ne voit jamais les mains des autres. Les parties simulées sont jouées avec la politique « malin » (qui tire les atouts en attaque puis encaisse ses cartes maîtresses), ce qui rend l'évaluation plus fidèle
+  - en attaque (quand son camp a pris), il commence par faire tomber les atouts adverses : atout maître d'abord, petit atout s'il est long en atouts ; ensuite seulement il encaisse ses maîtres. En défense, il évite d'ouvrir à l'atout et prépare une coupe dans une couleur courte
   - il fait et lit des **appels** : en défaussant hors atout, une carte forte (10, Roi, Dame) demande à son partenaire de rejouer cette couleur, une carte faible (7, 8) la refuse. Vous pouvez utiliser la même convention avec votre partenaire bot
 - **malin** : se souvient des cartes jouées, repère les cartes maîtresses, tire les atouts en attaque, charge quand le partenaire est maître, soutient son partenaire aux enchères
 - **simple** : heuristiques sans mémoire
 
-Mesures sur des donnes identiques jouées dans les deux sens (points d'écart par donne) : expert contre malin, +14 ± 1,4 en belote contrat et +17 ± 2,6 en coinche ; malin contre simple, environ +14.
+Mesures sur des donnes identiques jouées dans les deux sens (points d'écart par donne) : expert contre malin, environ +15 en belote contrat et +27 en coinche ; malin contre simple, environ +14. Le réglage actuel de l'expert (40 simulations, simulations jouées par le malin) bat la version précédente de 6,0 ± 1,0 points par donne en belote contrat (1200 donnes appariées) ; chercher à maximiser le score final de la donne plutôt que les points de cartes, essayé, jouait moins bien (−2,4 ± 1,0) et n'a pas été retenu.
 
 ## À faire
 

@@ -410,9 +410,10 @@ class BotMalin extends Bot {
     const ordre = carte.c === atout ? ORD_ATOUT : ORD_PLAIN;
     return ordre.slice(ordre.indexOf(carte.v) + 1).every((v) => connues.has(v + "|" + carte.c) || has(main, { v, c: carte.c }));
   }
-  choisirCarte(main, jouables, pli, atout, vus) {
+  choisirCarte(main, jouables, pli, atout, vus, connuesBase) {
     if (jouables.length === 1) return jouables[0];
-    const connues = new Set(vus.map((x) => k(x.carte)).concat(pli.map((x) => k(x.carte))));
+    const connues = new Set(connuesBase || vus.map((x) => k(x.carte)));
+    for (const x of pli) connues.add(k(x.carte));
     const dehors = ORD_ATOUT.map((v) => ({ v, c: atout })).filter((c) => !connues.has(k(c)) && !has(main, c));
     const moi = pli.length ? apres(pli[0].j, pli.length) : this.moi;
     const attaquant = this.preneur % 2 === moi % 2;
@@ -435,15 +436,24 @@ class BotMalin extends Bot {
     }
     return minBy(jouables, (c) => [pts(c, atout), force(c, atout, c.c)]);
   }
+  /* Entame : l'attaquant tire d'abord les atouts adverses, puis encaisse ses cartes maîtresses ;
+     le défenseur évite d'ouvrir à l'atout et prépare une coupe dans une couleur courte. */
   entame(main, jouables, atout, connues, dehors, attaquant) {
+    const mesAtouts = jouables.filter((c) => c.c === atout);
     if (attaquant && dehors.length) {
-      const maitres = jouables.filter((c) => c.c === atout && this.estMaitre(c, atout, connues, main));
+      const maitres = mesAtouts.filter((c) => this.estMaitre(c, atout, connues, main));
       if (maitres.length) return maxBy(maitres, (c) => [force(c, atout, atout)]);
+      // Long en atouts sans le maître : un petit atout fait tomber les honneurs adverses.
+      if (main.filter((c) => c.c === atout).length >= 4 && mesAtouts.length) return minBy(mesAtouts, (c) => [force(c, atout, atout)]);
     }
     const maitres = jouables.filter((c) => c.c !== atout && this.estMaitre(c, atout, connues, main));
     if (maitres.length) return maxBy(maitres, (c) => [pts(c, atout)]);
     const pool = jouables.filter((c) => c.c !== atout);
-    return minBy(pool.length ? pool : jouables, (c) => [pts(c, atout), force(c, atout, c.c)]);
+    const base = pool.length ? pool : jouables;
+    const longueur = {};
+    for (const couleur of COULEURS) longueur[couleur] = main.filter((c) => c.c === couleur).length;
+    const sens = attaquant ? -1 : 1; // attaque : couleur longue ; défense : couleur courte (pour couper)
+    return minBy(base, (c) => [pts(c, atout), sens * longueur[c.c], force(c, atout, c.c)]);
   }
 }
 
@@ -452,7 +462,7 @@ const APPELS = ["10", "Roi", "Dame"], REFUS = ["7", "8"];
 /* Bot expert : simule des donnes plausibles, lit les appels du partenaire et en envoie.
    N'utilise que des informations publiques (sa main, les cartes jouées, les enchères). */
 class BotExpert extends BotMalin {
-  constructor() { super(); this.ECHANTILLONS = 14; this.MARGE = 1.5; this.simple = new Bot(); }
+  constructor() { super(); this.ECHANTILLONS = 40; this.MARGE = 0.5; this.politique = new BotMalin(); }
 
   decouperPlis(vus, pli) {
     const plis = [];
@@ -512,24 +522,32 @@ class BotExpert extends BotMalin {
     return w;
   }
   retirer(main, carte) { const i = main.findIndex((c) => k(c) === k(carte)); main.splice(i, 1); }
-  jouerFin(mains, pli, atout, equipe) {
-    let gain = 0;
+  /* Termine la donne avec la politique malin. Renvoie les points de chaque équipe à partir de maintenant. */
+  jouerFin(mains, pli, atout, vus) {
+    const pol = this.politique;
+    pol.atout = atout; pol.preneur = this.preneur;
+    const connues = new Set(vus.map((x) => k(x.carte)));
+    const gain = [0, 0];
     pli = pli.slice();
     while (true) {
       while (pli.length < 4) {
         const j = apres(pli[0].j, pli.length);
         const jouables = cartesJouables(mains[j], pli, atout);
-        const carte = jouables.length === 1 ? jouables[0] : this.simple.choisirCarte(mains[j], jouables, pli, atout);
+        let carte;
+        if (jouables.length === 1) carte = jouables[0];
+        else { pol.moi = j; carte = pol.choisirCarte(mains[j], jouables, pli, atout, [], connues); }
         this.retirer(mains[j], carte);
         pli.push({ j, carte });
       }
       const gagnant = gagnantPli(pli, atout);
       const fini = mains.every((m) => m.length === 0);
-      const g = pli.reduce((s, x) => s + pts(x.carte, atout), 0) + (fini ? DIX_DE_DER : 0);
-      if (gagnant % 2 === equipe) gain += g;
+      gain[gagnant % 2] += pli.reduce((s, x) => s + pts(x.carte, atout), 0) + (fini ? DIX_DE_DER : 0);
       if (fini) return gain;
+      for (const x of pli) connues.add(k(x.carte));
       const jouables = mains[gagnant].slice();
-      const carte = jouables.length === 1 ? jouables[0] : this.simple.choisirCarte(mains[gagnant], jouables, [], atout);
+      let carte;
+      if (jouables.length === 1) carte = jouables[0];
+      else { pol.moi = gagnant; carte = pol.choisirCarte(mains[gagnant], jouables, [], atout, [], connues); }
       this.retirer(mains[gagnant], carte);
       pli = [{ j: gagnant, carte }];
     }
@@ -552,7 +570,7 @@ class BotExpert extends BotMalin {
       for (const c of jouables) {
         const simul = mains.map((m) => m.slice());
         simul[moi] = main.filter((x) => k(x) !== k(c));
-        totaux.set(k(c), totaux.get(k(c)) + w * this.jouerFin(simul, pli.concat([{ j: moi, carte: c }]), atout, moi % 2));
+        totaux.set(k(c), totaux.get(k(c)) + w * this.jouerFin(simul, pli.concat([{ j: moi, carte: c }]), atout, vus)[moi % 2]);
       }
     }
     for (const [cle, t] of totaux) totaux.set(cle, t / somme);
