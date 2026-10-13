@@ -332,6 +332,13 @@ function trierMain(main, atout) {
   return main.slice().sort((a, b) => cmpCle([ORDRE_MAIN.indexOf(a.c), -rang(a)], [ORDRE_MAIN.indexOf(b.c), -rang(b)]));
 }
 
+/* Partenaire maître : on charge de points, mais sans gaspiller d'atout si on peut se défausser. */
+function charge(jouables, atout, dem) {
+  const hors = jouables.filter((c) => c.c !== atout);
+  const pool = hors.length && !jouables.some((c) => c.c === dem) ? hors : jouables;
+  return maxBy(pool, (c) => [pts(c, atout), -force(c, atout, c.c)]);
+}
+
 /* ---- Bots ---- */
 class Bot {
   debutDonne(moi, atout, preneur) { this.moi = moi; this.atout = atout; this.preneur = preneur; }
@@ -376,7 +383,7 @@ class Bot {
     }
     const courant = gagnantPli(pli, atout);
     const joueur = apres(pli[0].j, pli.length);
-    if (courant === (joueur + 2) % 4) return maxBy(jouables, (c) => [pts(c, atout)]);
+    if (courant === (joueur + 2) % 4) return charge(jouables, atout, dem);
     const meilleure = Math.max(...pli.map((x) => force(x.carte, atout, dem)));
     const gagnantes = jouables.filter((c) => force(c, atout, dem) > meilleure);
     if (gagnantes.length) return minBy(gagnantes, (c) => [force(c, atout, dem)]);
@@ -425,7 +432,7 @@ class BotMalin extends Bot {
     if (courant === (moi + 2) % 4) {
       const cp = pli.find((x) => x.j === courant).carte;
       const sur = dernier || (this.estMaitre(cp, atout, connues, main) && (cp.c === atout || dehors.length === 0));
-      if (sur) return maxBy(jouables, (c) => [pts(c, atout), -force(c, atout, c.c)]);
+      if (sur) return charge(jouables, atout, dem);
       return minBy(jouables, (c) => [pts(c, atout), force(c, atout, c.c)]);
     }
     const gagnantes = jouables.filter((c) => force(c, atout, dem) > meilleure);
@@ -620,7 +627,7 @@ class BotExpert extends BotMalin {
     if (courant === (moi + 2) % 4) {
       const cp = pli.find((x) => x.j === courant).carte;
       const sur = dernier || (this.estMaitre(cp, atout, connues, main) && (cp.c === atout || dehors.length === 0));
-      if (sur) return maxBy(jouables, (c) => [pts(c, atout), -force(c, atout, c.c)]);
+      if (sur) return charge(jouables, atout, dem);
       return this.defausse(main, jouables, atout, dem, true);
     }
     const gagnantes = jouables.filter((c) => force(c, atout, dem) > meilleure);

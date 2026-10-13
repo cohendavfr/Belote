@@ -86,6 +86,13 @@ def cartes_jouables(main, pli, atout):
     return list(main)
 
 
+def charge(jouables, atout, demandee):
+    """Partenaire maître : on charge de points, mais sans gaspiller d'atout si on peut se défausser."""
+    hors = [c for c in jouables if c[1] != atout]
+    pool = hors if hors and not any(c[1] == demandee for c in jouables) else jouables
+    return max(pool, key=lambda c: (points(c, atout), -force(c, atout, c[1])))
+
+
 ORDRE_MAIN = ["Coeur", "Trefle", "Carreau", "Pique"]
 
 
@@ -169,7 +176,7 @@ class Bot:
         courant = gagnant_pli(pli, atout)
         joueur = apres(pli[0][0], len(pli))
         if courant == (joueur + 2) % 4:
-            return max(jouables, key=lambda c: points(c, atout))
+            return charge(jouables, atout, demandee)
         meilleure = max(force(c, atout, demandee) for _, c in pli)
         gagnantes = [c for c in jouables if force(c, atout, demandee) > meilleure]
         if gagnantes:
@@ -241,7 +248,7 @@ class BotMalin(Bot):
                 and (carte_partenaire[1] == atout or not atouts_dehors)
             )
             if sur:
-                return max(jouables, key=lambda c: (points(c, atout), -force(c, atout, c[1])))
+                return charge(jouables, atout, demandee)
             return min(jouables, key=lambda c: (points(c, atout), force(c, atout, c[1])))
 
         gagnantes = [c for c in jouables if force(c, atout, demandee) > meilleure]
@@ -484,7 +491,7 @@ class BotExpert(BotMalin):
                 and (carte_partenaire[1] == atout or not dehors)
             )
             if sur:
-                return max(jouables, key=lambda c: (points(c, atout), -force(c, atout, c[1])))
+                return charge(jouables, atout, demandee)
             return self.defausse(main, jouables, atout, demandee, partenaire_gagne=True)
         gagnantes = [c for c in jouables if force(c, atout, demandee) > meilleure]
         if gagnantes:

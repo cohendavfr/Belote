@@ -326,5 +326,23 @@ class TestSimulation(unittest.TestCase):
         self.assertGreater(jouees, 50)
 
 
+class TestPartenaireMaitre(unittest.TestCase):
+    """Partenaire maître et couleur absente : pas obligé de couper, et les bots ne gaspillent pas d'atout."""
+
+    def test_libre_de_couper(self):
+        main = [("Roi", "Carreau"), ("8", "Trefle"), ("Valet", "Coeur")]
+        pli = [(0, ("As", "Pique")), (3, ("7", "Carreau"))]
+        self.assertEqual(sorted(belote.cartes_jouables(main, pli, "Coeur")), sorted(main))
+
+    def test_bots_se_defaussent(self):
+        main = [("Valet", "Coeur"), ("Roi", "Carreau"), ("As", "Trefle")]
+        pli = [(0, ("As", "Pique")), (3, ("7", "Carreau"))]  # partenaire (0) maître, 3 joue avant 2
+        jouables = belote.cartes_jouables(main, pli, "Coeur")
+        for bot in (belote.Bot(), belote.BotMalin(), belote.BotExpert()):
+            bot.debut_donne(2, "Coeur", 1) if hasattr(bot, "debut_donne") else None
+            carte = bot.choisir_carte(main, jouables, pli, "Coeur")
+            self.assertNotEqual(carte[1], "Coeur", type(bot).__name__)
+
+
 if __name__ == "__main__":
     unittest.main()
